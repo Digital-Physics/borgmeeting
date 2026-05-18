@@ -224,6 +224,9 @@ export default function Room() {
     const myKeys = getMyKeys();
     const { key, model } = myKeys[provider];
 
+    // ADD THIS:
+    console.log('DEBUG askAI:', { provider, model, keyPrefix: key?.slice(0, 10), keyLength: key?.length });
+
     setContextFor(null);
     setAiTyping(provider);
 
