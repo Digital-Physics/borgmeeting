@@ -1,27 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ContextPicker from '../components/ContextPicker.jsx';
 
 const API = import.meta.env.VITE_WORKER_URL || '';
-const WS_URL = import.meta.env.VITE_WS_URL || API.replace('https://', 'wss://').replace('http://', 'ws://');
+const POLL_INTERVAL = 2500; // ms
 
 function formatTime(iso) {
   const d = new Date(iso);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-// Group consecutive messages from the same sender
-function groupMessages(messages) {
-  const groups = [];
-  for (const msg of messages) {
-    const last = groups[groups.length - 1];
-    if (last && last.sender_name === msg.sender_name && !msg.is_claude) {
-      last.messages.push(msg);
-    } else {
-      groups.push({ sender_name: msg.sender_name, is_claude: msg.is_claude, messages: [msg] });
-    }
-  }
-  return groups;
 }
 
 export default function Room() {
@@ -33,19 +19,19 @@ export default function Room() {
 
   const [room, setRoom] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [users, setUsers] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [claudeTyping, setClaudeTyping] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showContextPicker, setShowContextPicker] = useState(false);
+  const [error, setError] = useState('');
 
-  const wsRef = useRef(null);
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
-  const reconnectTimer = useRef(null);
+  const lastTimestampRef = useRef(null);
+  const pollRef = useRef(null);
 
-  // Redirect if no name stored
+  // Redirect if no name
   useEffect(() => {
     if (!myName) navigate('/');
   }, [myName, navigate]);
@@ -61,110 +47,67 @@ export default function Room() {
       .catch(() => navigate('/'));
   }, [roomId, navigate]);
 
-  // WebSocket connection
-  const connect = useCallback(() => {
-    if (!myName) return;
-    const ws = new WebSocket(`${WS_URL}/room/${roomId}`);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'join', name: myName }));
-      setLoading(false);
-    };
-
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      switch (msg.type) {
-        case 'history':
-          setMessages(msg.messages);
-          setUsers(msg.users);
-          break;
-        case 'message':
-          setMessages(prev => [...prev, msg]);
-          setClaudeTyping(false);
-          break;
-        case 'user_joined':
-          setUsers(msg.users);
-          setMessages(prev => [...prev, {
-            id: Date.now(),
-            system: true,
-            content: `${msg.name} joined`,
-            created_at: new Date().toISOString(),
-          }]);
-          break;
-        case 'user_left':
-          setUsers(msg.users);
-          setMessages(prev => [...prev, {
-            id: Date.now(),
-            system: true,
-            content: `${msg.name} left`,
-            created_at: new Date().toISOString(),
-          }]);
-          break;
-      }
-    };
-
-    ws.onclose = () => {
-      reconnectTimer.current = setTimeout(connect, 3000);
-    };
-
-    ws.onerror = () => ws.close();
-  }, [roomId, myName]);
-
+  // Initial message load
   useEffect(() => {
-    connect();
-    return () => {
-      clearTimeout(reconnectTimer.current);
-      wsRef.current?.close();
-    };
-  }, [connect]);
+    fetch(`${API}/api/rooms/${roomId}/messages`)
+      .then(r => r.json())
+      .then(data => {
+        setMessages(data);
+        if (data.length > 0) {
+          lastTimestampRef.current = data[data.length - 1].created_at;
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [roomId]);
+
+  // Polling for new messages
+  useEffect(() => {
+    pollRef.current = setInterval(async () => {
+      try {
+        const since = lastTimestampRef.current;
+        const url = since
+          ? `${API}/api/rooms/${roomId}/messages?since=${encodeURIComponent(since)}`
+          : `${API}/api/rooms/${roomId}/messages`;
+
+        const res = await fetch(url);
+        const newMsgs = await res.json();
+
+        if (newMsgs.length > 0) {
+          setMessages(prev => [...prev, ...newMsgs]);
+          lastTimestampRef.current = newMsgs[newMsgs.length - 1].created_at;
+          setClaudeTyping(false);
+        }
+      } catch (err) {
+        // silent fail on poll errors
+      }
+    }, POLL_INTERVAL);
+
+    return () => clearInterval(pollRef.current);
+  }, [roomId]);
 
   // Auto scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, claudeTyping]);
 
-  function sendMessage(content) {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ type: 'message', content }));
-  }
-
-  async function askClaude(selectedMessages) {
-    setShowContextPicker(false);
-    setClaudeTyping(true);
-
-    // Build messages array for Claude
-    const claudeMessages = selectedMessages.map(m => ({
-      role: m.is_claude ? 'assistant' : 'user',
-      content: m.is_claude ? m.content : `${m.sender_name}: ${m.content}`,
-    }));
-
-    // Add the @claude trigger message
-    claudeMessages.push({
-      role: 'user',
-      content: `${myName}: ${input.trim()}`,
-    });
-
+  async function sendMessage(content) {
+    setError('');
     try {
-      const res = await fetch(`${API}/api/claude`, {
+      const res = await fetch(`${API}/api/rooms/${roomId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey, messages: claudeMessages }),
+        body: JSON.stringify({ senderName: myName, content }),
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || 'Failed to send');
 
-      // First send the user's @claude message
-      sendMessage(input.trim());
-      setInput('');
-
-      // Then broadcast Claude's response via WebSocket
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'claude_response', content: data.text }));
+      // If Claude responded, it'll come in on next poll
+      if (data.claudeResponse) {
+        setClaudeTyping(false);
       }
     } catch (err) {
-      setClaudeTyping(false);
-      alert(`Claude error: ${err.message}`);
+      setError(err.message);
     }
   }
 
@@ -180,12 +123,19 @@ export default function Room() {
     if (!val) return;
 
     if (val.toLowerCase().includes('@claude')) {
-      // Show context picker
       setShowContextPicker(true);
     } else {
       sendMessage(val);
       setInput('');
     }
+  }
+
+  async function askClaude(selectedMessages) {
+    setShowContextPicker(false);
+    setClaudeTyping(true);
+    const val = input.trim();
+    setInput('');
+    await sendMessage(val);
   }
 
   function copyInviteLink() {
@@ -194,13 +144,6 @@ export default function Room() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
-
-  const userList = users.filter(Boolean).join(', ');
-  const groups = groupMessages(messages.filter(m => !m.system));
-  const systemMessages = messages.filter(m => m.system);
-
-  // Interleave system messages with groups for rendering
-  const allRendered = messages.map((msg, i) => ({ msg, i }));
 
   if (loading) {
     return (
@@ -216,11 +159,7 @@ export default function Room() {
       <div className="room-header">
         <div className="room-header-left">
           <div className="room-name">{room?.name || roomId}</div>
-          <div className="room-users">
-            {users.length === 0 ? 'No one here yet' :
-             users.length === 1 ? `Just you` :
-             `${users.length} people — ${userList}`}
-          </div>
+          <div className="room-users">Room ID: {roomId}</div>
         </div>
         <div className="room-header-right">
           <button
@@ -247,15 +186,7 @@ export default function Room() {
       </div>
 
       <div className="messages">
-        {allRendered.map(({ msg }) => {
-          if (msg.system) {
-            return (
-              <div key={msg.id} className="system-msg">
-                {msg.content}
-              </div>
-            );
-          }
-
+        {messages.map((msg) => {
           const isMe = msg.sender_name === myName;
           const isClaude = msg.is_claude;
 
@@ -274,7 +205,7 @@ export default function Room() {
           }
 
           return (
-            <div key={msg.id} className={`msg-group`}>
+            <div key={msg.id} className="msg-group">
               {!isMe && (
                 <div className="msg-sender-label">{msg.sender_name}</div>
               )}
@@ -314,7 +245,6 @@ export default function Room() {
             value={input}
             onChange={e => {
               setInput(e.target.value);
-              // Auto-resize
               e.target.style.height = 'auto';
               e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
             }}
@@ -330,6 +260,7 @@ export default function Room() {
             </svg>
           </button>
         </div>
+        {error && <div className="error-msg">{error}</div>}
         {!apiKey && (
           <div className="at-hint">
             @claude is disabled — only the room creator can invoke AI
@@ -339,7 +270,7 @@ export default function Room() {
 
       {showContextPicker && (
         <ContextPicker
-          messages={messages.filter(m => !m.system)}
+          messages={messages}
           onConfirm={askClaude}
           onCancel={() => setShowContextPicker(false)}
         />
