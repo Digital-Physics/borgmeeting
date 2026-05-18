@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import ContextPicker from '../components/ContextPicker.jsx';
 
 const API = import.meta.env.VITE_WORKER_URL || '';
-const POLL_INTERVAL = 2500; // ms
+const POLL_INTERVAL = 2500;
 
 const MODEL_LABELS = {
   claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', grok: 'Grok',
@@ -43,9 +43,15 @@ export default function Room() {
   const { roomId } = useParams();
   const navigate = useNavigate();
 
-  const myName = sessionStorage.getItem(`name_${roomId}`);
   const storedKeys = sessionStorage.getItem(`apiKeys_${roomId}`);
   const isHost = !!storedKeys;
+
+  // Join state — shown when no name is stored for this room
+  const [joined, setJoined] = useState(!!sessionStorage.getItem(`name_${roomId}`));
+  const [myName, setMyName] = useState(sessionStorage.getItem(`name_${roomId}`) || '');
+  const [joinName, setJoinName] = useState('');
+  const [joinLoading, setJoinLoading] = useState(false);
+  const [joinError, setJoinError] = useState('');
 
   const [room, setRoom] = useState(null);
   const [enabledModels, setEnabledModels] = useState([]);
@@ -66,9 +72,7 @@ export default function Room() {
   const lastTimestampRef = useRef(null);
   const pollTimerRef = useRef(null);
 
-  useEffect(() => { if (!myName) navigate('/'); }, [myName, navigate]);
-
-  // Load room info
+  // Always load room info (needed for join screen too)
   useEffect(() => {
     fetch(`${API}/api/rooms/${roomId}`)
       .then(r => r.json())
@@ -80,7 +84,25 @@ export default function Room() {
       .catch(() => navigate('/'));
   }, [roomId, navigate]);
 
-  // Fetch messages — full load or incremental
+  async function handleJoin(e) {
+    e.preventDefault();
+    if (!joinName.trim()) return;
+    setJoinLoading(true);
+    setJoinError('');
+    try {
+      const res = await fetch(`${API}/api/rooms/${roomId}`);
+      if (!res.ok) throw new Error('Meeting not found.');
+      sessionStorage.setItem(`name_${roomId}`, joinName.trim());
+      setMyName(joinName.trim());
+      setJoined(true);
+    } catch (err) {
+      setJoinError(err.message);
+    } finally {
+      setJoinLoading(false);
+    }
+  }
+
+  // Fetch messages
   const fetchMessages = useCallback(async (incremental = false) => {
     try {
       const url = incremental && lastTimestampRef.current
@@ -97,23 +119,23 @@ export default function Room() {
           setMessages(prev => [...prev, ...data]);
         } else {
           setMessages(data);
-          setLoading(false);
         }
-      } else if (!incremental) {
-        setLoading(false);
       }
-    } catch (_) {}
+      setLoading(false);
+    } catch (_) {
+      setLoading(false);
+    }
   }, [roomId]);
 
-  // Initial load then start polling
+  // Only start polling after joined
   useEffect(() => {
+    if (!joined) return;
     fetchMessages(false).then(() => {
       pollTimerRef.current = setInterval(() => fetchMessages(true), POLL_INTERVAL);
     });
     return () => clearInterval(pollTimerRef.current);
-  }, [fetchMessages]);
+  }, [joined, fetchMessages]);
 
-  // Auto scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, aiTyping]);
@@ -124,7 +146,6 @@ export default function Room() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ senderName, content, isClaude, aiModel }),
     });
-    // Immediately fetch to show the message without waiting for next poll
     await fetchMessages(true);
   }
 
@@ -161,7 +182,6 @@ export default function Room() {
     }));
     aiMessages.push({ role: 'user', content: `${myName}: ${input.trim()}` });
 
-    // Post the user's message first
     await postMessage(myName, input.trim());
     setInput('');
     if (inputRef.current) inputRef.current.style.height = 'auto';
@@ -173,10 +193,8 @@ export default function Room() {
         body: JSON.stringify({ roomId, model, messages: aiMessages }),
       });
       const data = await res.json();
-
       if (data.error === 'no_key') { setAiTyping(null); setMissingKeyModel(model); return; }
       if (data.error) throw new Error(data.error);
-
       await postMessage(model, data.text, true, model);
     } catch (err) {
       alert(`AI error: ${err.message}`);
@@ -222,9 +240,46 @@ export default function Room() {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  // ── Join screen ──────────────────────────────────────────────────────────
+  if (!joined) {
+    return (
+      <div className="home">
+        <div className="home-card">
+          <div className="home-logo">Borg<span>Meeting</span></div>
+          {room && (
+            <div className="join-room-info">
+              <div className="join-room-label">You're joining</div>
+              <div className="join-room-name">{room.name}</div>
+              {enabledModels.length > 0 && (
+                <div className="join-room-models">
+                  {enabledModels.map(m => (
+                    <span key={m} className="model-badge">{MODEL_LABELS[m]}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <form onSubmit={handleJoin}>
+            <div className="form-group">
+              <label className="form-label">Your name</label>
+              <input className="form-input" placeholder="How others will see you"
+                value={joinName} onChange={e => setJoinName(e.target.value)} autoFocus />
+            </div>
+            <button className="btn-primary" type="submit"
+              disabled={joinLoading || !joinName.trim()}>
+              {joinLoading ? 'Joining…' : 'Join meeting →'}
+            </button>
+            {joinError && <div className="error-msg">{joinError}</div>}
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Chat screen ──────────────────────────────────────────────────────────
   const modelHandleHint = enabledModels.map(m => `@${m === 'chatgpt' ? 'gpt' : m}`).join(', ');
 
-  if (loading) return <div className="loading-screen"><div className="spinner" />Connecting…</div>;
+  if (loading) return <div className="loading-screen"><div className="spinner" />Loading…</div>;
 
   return (
     <div className="room">
@@ -310,7 +365,7 @@ export default function Room() {
       </div>
 
       {contextFor && (
-        <ContextPicker messages={messages.filter(m => !m.system)}
+        <ContextPicker messages={messages}
           modelLabel={MODEL_LABELS[contextFor]}
           onConfirm={askAI} onCancel={() => setContextFor(null)} />
       )}
