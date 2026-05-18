@@ -379,8 +379,152 @@ a {
   30% { transform: translateY(-4px); }
 }
 
-/* Input area */
-.input-area {
+/* Mobile zoom fix — must be 16px+ to prevent iOS Safari autozoom */
+.msg-input {
+  flex: 1;
+  background: none;
+  font-size: 16px;
+  color: var(--text-primary);
+  resize: none;
+  max-height: 120px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+/* Model picker */
+.model-picker {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.model-btn {
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--border);
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  transition: all 0.15s;
+  font-family: var(--font);
+  cursor: pointer;
+}
+
+.model-btn:hover {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+.model-btn.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+/* Model badge in room header */
+.model-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  vertical-align: middle;
+}
+
+/* End meeting button */
+.btn-end {
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius-full);
+  border: 1.5px solid #e8d0ce;
+  color: #c0392b;
+  background: #fdf4f3;
+  transition: all 0.15s;
+  font-family: var(--font);
+  cursor: pointer;
+}
+
+.btn-end:hover {
+  background: #fae8e6;
+  border-color: #c0392b;
+}
+
+/* End meeting confirm dialog */
+.end-confirm {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 400px;
+  padding: 28px 24px 20px;
+  box-shadow: var(--shadow-lg);
+}
+
+.end-confirm-title {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.end-confirm-body {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.end-confirm-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.btn-end-confirm {
+  flex: 2;
+  padding: 11px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  background: #c0392b;
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font);
+  transition: opacity 0.15s;
+}
+
+.btn-end-confirm:hover { opacity: 0.85; }
+
+/* Join via link — room info display */
+.join-room-info {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.join-room-label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 3px;
+}
+
+.join-room-name {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
   padding: 12px 20px 20px;
   background: var(--surface);
   border-top: 1px solid var(--border);
@@ -401,17 +545,6 @@ a {
 .input-row:focus-within {
   border-color: var(--accent);
   background: var(--surface);
-}
-
-.msg-input {
-  flex: 1;
-  background: none;
-  font-size: 14px;
-  color: var(--text-primary);
-  resize: none;
-  max-height: 120px;
-  overflow-y: auto;
-  line-height: 1.5;
 }
 
 .msg-input::placeholder {
@@ -635,4 +768,61 @@ a {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Multi-model key entry list */
+.multi-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.model-key-row {
+  padding: 12px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.model-key-row.enabled {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.model-key-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.model-key-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.model-key-badge {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+}
+
+.model-key-input {
+  margin-bottom: 4px;
+}
+
+/* Join screen model badges row */
+.join-room-models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
 }
