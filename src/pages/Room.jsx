@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import ContextPicker from '../components/ContextPicker.jsx';
 
 const API = import.meta.env.VITE_WORKER_URL || '';
-const WS_URL = import.meta.env.VITE_WS_URL || API.replace('https://', 'wss://').replace('http://', 'ws://');
+const POLL_INTERVAL = 2500; // ms
 
 const MODEL_LABELS = {
   claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', grok: 'Grok',
@@ -50,7 +50,6 @@ export default function Room() {
   const [room, setRoom] = useState(null);
   const [enabledModels, setEnabledModels] = useState([]);
   const [messages, setMessages] = useState([]);
-  const [users, setUsers] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [aiTyping, setAiTyping] = useState(null);
@@ -62,13 +61,14 @@ export default function Room() {
   const [addKeyLoading, setAddKeyLoading] = useState(false);
   const [addKeyError, setAddKeyError] = useState('');
 
-  const wsRef = useRef(null);
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
-  const reconnectTimer = useRef(null);
+  const lastTimestampRef = useRef(null);
+  const pollTimerRef = useRef(null);
 
   useEffect(() => { if (!myName) navigate('/'); }, [myName, navigate]);
 
+  // Load room info
   useEffect(() => {
     fetch(`${API}/api/rooms/${roomId}`)
       .then(r => r.json())
@@ -80,53 +80,52 @@ export default function Room() {
       .catch(() => navigate('/'));
   }, [roomId, navigate]);
 
-  const connect = useCallback(() => {
-    if (!myName) return;
-    const ws = new WebSocket(`${WS_URL}/room/${roomId}`);
-    wsRef.current = ws;
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'join', name: myName }));
-      setLoading(false);
-    };
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      switch (msg.type) {
-        case 'history': setMessages(msg.messages); setUsers(msg.users); break;
-        case 'message': setMessages(prev => [...prev, msg]); setAiTyping(null); break;
-        case 'user_joined':
-          setUsers(msg.users);
-          setMessages(prev => [...prev, { id: Date.now(), system: true,
-            content: `${msg.name} joined`, created_at: new Date().toISOString() }]);
-          break;
-        case 'user_left':
-          setUsers(msg.users);
-          setMessages(prev => [...prev, { id: Date.now(), system: true,
-            content: `${msg.name} left`, created_at: new Date().toISOString() }]);
-          break;
-        case 'meeting_ended':
-          alert('The meeting has been ended by the host.');
-          navigate('/');
-          break;
-        case 'models_updated':
-          setEnabledModels(msg.enabledModels);
-          break;
+  // Fetch messages — full load or incremental
+  const fetchMessages = useCallback(async (incremental = false) => {
+    try {
+      const url = incremental && lastTimestampRef.current
+        ? `${API}/api/rooms/${roomId}/messages?since=${encodeURIComponent(lastTimestampRef.current)}`
+        : `${API}/api/rooms/${roomId}/messages`;
+
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (data.length > 0) {
+        lastTimestampRef.current = data[data.length - 1].created_at;
+        if (incremental) {
+          setMessages(prev => [...prev, ...data]);
+        } else {
+          setMessages(data);
+          setLoading(false);
+        }
+      } else if (!incremental) {
+        setLoading(false);
       }
-    };
-    ws.onclose = () => { reconnectTimer.current = setTimeout(connect, 3000); };
-    ws.onerror = () => ws.close();
-  }, [roomId, myName, navigate]);
+    } catch (_) {}
+  }, [roomId]);
 
+  // Initial load then start polling
   useEffect(() => {
-    connect();
-    return () => { clearTimeout(reconnectTimer.current); wsRef.current?.close(); };
-  }, [connect]);
+    fetchMessages(false).then(() => {
+      pollTimerRef.current = setInterval(() => fetchMessages(true), POLL_INTERVAL);
+    });
+    return () => clearInterval(pollTimerRef.current);
+  }, [fetchMessages]);
 
+  // Auto scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, aiTyping]);
 
-  function sendWS(obj) {
-    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(obj));
+  async function postMessage(senderName, content, isClaude = false, aiModel = null) {
+    await fetch(`${API}/api/rooms/${roomId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ senderName, content, isClaude, aiModel }),
+    });
+    // Immediately fetch to show the message without waiting for next poll
+    await fetchMessages(true);
   }
 
   function handleKeyDown(e) {
@@ -141,7 +140,7 @@ export default function Room() {
       if (!enabledModels.includes(mentionedModel)) { setMissingKeyModel(mentionedModel); return; }
       setContextFor(mentionedModel);
     } else {
-      sendWS({ type: 'message', content: val });
+      postMessage(myName, val);
       setInput('');
       if (inputRef.current) {
         inputRef.current.style.height = 'auto';
@@ -155,11 +154,18 @@ export default function Room() {
     const model = contextFor;
     setContextFor(null);
     setAiTyping(model);
+
     const aiMessages = selectedMessages.map(m => ({
       role: m.is_claude ? 'assistant' : 'user',
       content: m.is_claude ? m.content : `${m.sender_name}: ${m.content}`,
     }));
     aiMessages.push({ role: 'user', content: `${myName}: ${input.trim()}` });
+
+    // Post the user's message first
+    await postMessage(myName, input.trim());
+    setInput('');
+    if (inputRef.current) inputRef.current.style.height = 'auto';
+
     try {
       const res = await fetch(`${API}/api/ai`, {
         method: 'POST',
@@ -167,15 +173,15 @@ export default function Room() {
         body: JSON.stringify({ roomId, model, messages: aiMessages }),
       });
       const data = await res.json();
+
       if (data.error === 'no_key') { setAiTyping(null); setMissingKeyModel(model); return; }
       if (data.error) throw new Error(data.error);
-      sendWS({ type: 'message', content: input.trim() });
-      setInput('');
-      if (inputRef.current) inputRef.current.style.height = 'auto';
-      sendWS({ type: 'claude_response', content: data.text, model });
+
+      await postMessage(model, data.text, true, model);
     } catch (err) {
-      setAiTyping(null);
       alert(`AI error: ${err.message}`);
+    } finally {
+      setAiTyping(null);
     }
   }
 
@@ -195,7 +201,6 @@ export default function Room() {
       existing[missingKeyModel] = addKeyInput.trim();
       sessionStorage.setItem(`apiKeys_${roomId}`, JSON.stringify(existing));
       setEnabledModels(data.enabledModels);
-      sendWS({ type: 'models_updated', enabledModels: data.enabledModels });
       setMissingKeyModel(null);
       setAddKeyInput('');
     } catch (err) {
@@ -207,7 +212,6 @@ export default function Room() {
 
   async function handleEndMeeting() {
     setShowEndConfirm(false);
-    sendWS({ type: 'end_meeting' });
     await fetch(`${API}/api/rooms/${roomId}`, { method: 'DELETE' });
     navigate('/');
   }
@@ -218,7 +222,6 @@ export default function Room() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  const userList = users.filter(Boolean).join(', ');
   const modelHandleHint = enabledModels.map(m => `@${m === 'chatgpt' ? 'gpt' : m}`).join(', ');
 
   if (loading) return <div className="loading-screen"><div className="spinner" />Connecting…</div>;
@@ -229,7 +232,6 @@ export default function Room() {
         <div className="room-header-left">
           <div className="room-name">{room?.name || roomId}</div>
           <div className="room-users">
-            {users.length <= 1 ? 'Just you' : `${users.length} people — ${userList}`}
             {enabledModels.map(m => <span key={m} className="model-badge">{MODEL_LABELS[m]}</span>)}
           </div>
         </div>
@@ -246,10 +248,10 @@ export default function Room() {
 
       <div className="messages">
         {messages.map(msg => {
-          if (msg.system) return <div key={msg.id} className="system-msg">{msg.content}</div>;
           const isMe = msg.sender_name === myName;
           const isAI = msg.is_claude;
           const aiModel = msg.ai_model || 'claude';
+
           if (isAI) return (
             <div key={msg.id} className="msg-group">
               <div className="msg-row claude-row">
@@ -261,6 +263,7 @@ export default function Room() {
               </div>
             </div>
           );
+
           return (
             <div key={msg.id} className="msg-group">
               {!isMe && <div className="msg-sender-label">{msg.sender_name}</div>}
@@ -272,6 +275,7 @@ export default function Room() {
             </div>
           );
         })}
+
         {aiTyping && (
           <div className="msg-group">
             <div className="msg-row claude-row">
