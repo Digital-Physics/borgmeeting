@@ -2,12 +2,10 @@ import { useState, useEffect } from 'react';
 
 const MAX_CONTEXT = 20;
 
-export default function ContextPicker({ messages, onConfirm, onCancel }) {
-  // Start with the last MAX_CONTEXT messages all selected
+export default function ContextPicker({ messages, modelLabel = 'AI', onConfirm, onCancel }) {
   const recentMessages = messages.slice(-MAX_CONTEXT);
   const [excluded, setExcluded] = useState(new Set());
 
-  // Close on Escape
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onCancel(); };
     window.addEventListener('keydown', handler);
@@ -21,14 +19,6 @@ export default function ContextPicker({ messages, onConfirm, onCancel }) {
       else next.add(id);
       return next;
     });
-  }
-
-  function selectAll() {
-    setExcluded(new Set());
-  }
-
-  function deselectAll() {
-    setExcluded(new Set(recentMessages.map(m => m.id)));
   }
 
   function handleConfirm() {
@@ -46,21 +36,21 @@ export default function ContextPicker({ messages, onConfirm, onCancel }) {
     <div className="context-picker-overlay" onClick={e => { if (e.target === e.currentTarget) onCancel(); }}>
       <div className="context-picker">
         <div className="context-picker-header">
-          <div className="context-picker-title">Choose Claude's context</div>
+          <div className="context-picker-title">Choose {modelLabel}'s context</div>
           <div className="context-picker-subtitle">
-            Uncheck messages you don't want Claude to see.{' '}
+            Uncheck messages you don't want {modelLabel} to see.{' '}
             {selectedCount} of {recentMessages.length} selected.
           </div>
           <div className="context-picker-actions">
-            <button className="btn-sm" onClick={selectAll}>Select all</button>
-            <button className="btn-sm" onClick={deselectAll}>Deselect all</button>
+            <button className="btn-sm" onClick={() => setExcluded(new Set())}>Select all</button>
+            <button className="btn-sm" onClick={() => setExcluded(new Set(recentMessages.map(m => m.id)))}>Deselect all</button>
           </div>
         </div>
 
         <div className="context-messages">
           {recentMessages.length === 0 ? (
             <div style={{ padding: '20px', color: 'var(--text-tertiary)', fontSize: 13, textAlign: 'center' }}>
-              No messages yet — Claude will only see your current message.
+              No messages yet — {modelLabel} will only see your current message.
             </div>
           ) : (
             recentMessages.map(msg => {
@@ -80,7 +70,7 @@ export default function ContextPicker({ messages, onConfirm, onCancel }) {
                   </div>
                   <div className="context-msg-content">
                     <div className="context-msg-sender">
-                      {msg.is_claude ? 'Claude' : msg.sender_name}
+                      {msg.is_claude ? (msg.ai_model ? msg.ai_model.charAt(0).toUpperCase() + msg.ai_model.slice(1) : modelLabel) : msg.sender_name}
                     </div>
                     <div className="context-msg-text">
                       {truncate(msg.content)}
@@ -95,7 +85,7 @@ export default function ContextPicker({ messages, onConfirm, onCancel }) {
         <div className="context-picker-footer">
           <button className="btn-cancel" onClick={onCancel}>Cancel</button>
           <button className="btn-ask-claude" onClick={handleConfirm}>
-            Ask Claude →
+            Ask {modelLabel} →
           </button>
         </div>
       </div>
