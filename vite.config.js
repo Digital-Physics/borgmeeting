@@ -5,11 +5,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:8787',
-      '/room': {
-        target: 'ws://localhost:8787',
-        ws: true,
-      },
+      '/api': 'https://claud-chat-worker.jdkhanlian.workers.dev',
     },
   },
 });
