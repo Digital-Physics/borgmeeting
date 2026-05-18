@@ -10,6 +10,8 @@ const MODELS = [
   { id: 'grok',    label: 'Grok',    hint: 'console.x.ai',          placeholder: 'xai-...' },
 ];
 
+const MODEL_LABEL = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', grok: 'Grok' };
+
 export default function Home() {
   const navigate = useNavigate();
 
@@ -61,7 +63,6 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create meeting');
-      // Store identity + keys locally for the host session
       sessionStorage.setItem(`name_${data.roomId}`, creatorName.trim());
       sessionStorage.setItem(`apiKeys_${data.roomId}`, JSON.stringify(apiKeys));
       navigate(`/room/${data.roomId}`);
@@ -120,7 +121,6 @@ export default function Home() {
               <input className="form-input" placeholder="e.g. Strategy brainstorm"
                 value={roomName} onChange={e => setRoomName(e.target.value)} />
             </div>
-
             <div className="form-group">
               <label className="form-label">AI participants</label>
               <div className="form-hint" style={{ marginBottom: 10 }}>
@@ -147,7 +147,6 @@ export default function Home() {
                 ))}
               </div>
             </div>
-
             <button className="btn-primary" type="submit"
               disabled={loading || !roomName.trim() || !creatorName.trim() || !hasAtLeastOneKey}>
               {loading ? 'Creating…' : 'Start meeting →'}
@@ -176,205 +175,6 @@ export default function Home() {
             </div>
             <button className="btn-primary" type="submit"
               disabled={loading || !joinName.trim()}>
-              {loading ? 'Joining…' : 'Join meeting →'}
-            </button>
-            {error && <div className="error-msg">{error}</div>}
-          </form>
-        )}
-      </div>
-    </div>
-  );
-}
-
-const MODEL_LABEL = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', grok: 'Grok' };
-
-
-export default function Home() {
-  const navigate = useNavigate();
-
-  // If URL has a roomId param, pre-select join tab
-  const pathMatch = window.location.pathname.match(/\/room\/([a-z0-9]+)/i);
-  const prefilledRoomId = pathMatch ? pathMatch[1] : '';
-
-  const [tab, setTab] = useState(prefilledRoomId ? 'join' : 'create');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  // Create form
-  const [roomName, setRoomName] = useState('');
-  const [creatorName, setCreatorName] = useState('');
-  const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('claude');
-
-  // Join form — roomId pre-filled from URL
-  const [joinName, setJoinName] = useState('');
-  const [joinRoomId] = useState(prefilledRoomId);
-  const [roomInfo, setRoomInfo] = useState(null);
-
-  // If joining via link, fetch room name to show it
-  useEffect(() => {
-    if (prefilledRoomId) {
-      fetch(`${API}/api/rooms/${prefilledRoomId}`)
-        .then(r => r.json())
-        .then(d => { if (!d.error) setRoomInfo(d); })
-        .catch(() => {});
-    }
-  }, [prefilledRoomId]);
-
-  async function handleCreate(e) {
-    e.preventDefault();
-    if (!roomName.trim() || !creatorName.trim() || !apiKey.trim()) return;
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch(`${API}/api/rooms`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          roomName: roomName.trim(),
-          creatorName: creatorName.trim(),
-          apiKey: apiKey.trim(),
-          model,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create room');
-      sessionStorage.setItem(`name_${data.roomId}`, creatorName.trim());
-      sessionStorage.setItem(`apiKey_${data.roomId}`, apiKey.trim());
-      sessionStorage.setItem(`model_${data.roomId}`, model);
-      navigate(`/room/${data.roomId}`);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleJoin(e) {
-    e.preventDefault();
-    if (!joinName.trim()) return;
-    setLoading(true);
-    setError('');
-    try {
-      const roomId = joinRoomId.trim();
-      const res = await fetch(`${API}/api/rooms/${roomId}`);
-      if (!res.ok) throw new Error('Room not found. Check the link and try again.');
-      sessionStorage.setItem(`name_${roomId}`, joinName.trim());
-      navigate(`/room/${roomId}`);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const selectedModel = MODELS.find(m => m.id === model);
-
-  return (
-    <div className="home">
-      <div className="home-card">
-        <div className="home-logo">Borg<span>Meeting</span></div>
-        <div className="home-tagline">shared AI-powered meetings</div>
-
-        {/* Only show tabs if not arriving via invite link */}
-        {!prefilledRoomId && (
-          <div className="home-tabs">
-            <button
-              className={`home-tab ${tab === 'create' ? 'active' : ''}`}
-              onClick={() => { setTab('create'); setError(''); }}
-            >
-              Create meeting
-            </button>
-            <button
-              className={`home-tab ${tab === 'join' ? 'active' : ''}`}
-              onClick={() => { setTab('join'); setError(''); }}
-            >
-              Join meeting
-            </button>
-          </div>
-        )}
-
-        {tab === 'create' ? (
-          <form onSubmit={handleCreate}>
-            <div className="form-group">
-              <label className="form-label">Your name</label>
-              <input
-                className="form-input"
-                placeholder="How others will see you"
-                value={creatorName}
-                onChange={e => setCreatorName(e.target.value)}
-                autoFocus
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Meeting name</label>
-              <input
-                className="form-input"
-                placeholder="e.g. Strategy brainstorm"
-                value={roomName}
-                onChange={e => setRoomName(e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label">AI model</label>
-              <div className="model-picker">
-                {MODELS.map(m => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    className={`model-btn ${model === m.id ? 'active' : ''}`}
-                    onClick={() => setModel(m.id)}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">API key</label>
-              <input
-                className="form-input"
-                placeholder={selectedModel.placeholder}
-                type="password"
-                value={apiKey}
-                onChange={e => setApiKey(e.target.value)}
-              />
-              <div className="form-hint">
-                {selectedModel.label} key — get one at {selectedModel.hint}
-              </div>
-            </div>
-            <button
-              className="btn-primary"
-              type="submit"
-              disabled={loading || !roomName.trim() || !creatorName.trim() || !apiKey.trim()}
-            >
-              {loading ? 'Creating…' : 'Start meeting →'}
-            </button>
-            {error && <div className="error-msg">{error}</div>}
-          </form>
-        ) : (
-          <form onSubmit={handleJoin}>
-            {roomInfo && (
-              <div className="join-room-info">
-                <div className="join-room-label">You're joining</div>
-                <div className="join-room-name">{roomInfo.name}</div>
-              </div>
-            )}
-            <div className="form-group">
-              <label className="form-label">Your name</label>
-              <input
-                className="form-input"
-                placeholder="How others will see you"
-                value={joinName}
-                onChange={e => setJoinName(e.target.value)}
-                autoFocus
-              />
-            </div>
-            <button
-              className="btn-primary"
-              type="submit"
-              disabled={loading || !joinName.trim()}
-            >
               {loading ? 'Joining…' : 'Join meeting →'}
             </button>
             {error && <div className="error-msg">{error}</div>}
