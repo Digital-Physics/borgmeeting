@@ -5,48 +5,70 @@ import ContextPicker from '../components/ContextPicker.jsx';
 const API = import.meta.env.VITE_WORKER_URL || '';
 const POLL_INTERVAL = 2500;
 
-const MODEL_LABELS = {
+const PROVIDER_LABELS = {
   claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', grok: 'Grok',
 };
 
-const MODEL_HANDLES = {
+const PROVIDER_MODELS = {
+  claude: [
+    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 — fastest, cheapest' },
+    { id: 'claude-sonnet-4-6',         label: 'Sonnet 4.6 — balanced' },
+    { id: 'claude-opus-4-6',           label: 'Opus 4.6 — most capable' },
+  ],
+  chatgpt: [
+    { id: 'gpt-4o-mini', label: 'GPT-4o mini — fastest, cheapest' },
+    { id: 'gpt-4o',      label: 'GPT-4o — balanced' },
+    { id: 'gpt-4.1',     label: 'GPT-4.1 — strong coding' },
+  ],
+  gemini: [
+    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash — fastest, cheapest' },
+    { id: 'gemini-2.5-pro',   label: 'Gemini 2.5 Pro — most capable' },
+  ],
+  grok: [
+    { id: 'grok-3',    label: 'Grok 3 — standard' },
+    { id: 'grok-4.20', label: 'Grok 4.20 — newest flagship' },
+  ],
+};
+
+const PROVIDER_PLACEHOLDERS = {
+  claude: 'sk-ant-...', chatgpt: 'sk-...', gemini: 'AIza...', grok: 'xai-...',
+};
+
+const PROVIDER_HINTS = {
+  claude: 'console.anthropic.com', chatgpt: 'platform.openai.com',
+  gemini: 'aistudio.google.com', grok: 'console.x.ai',
+};
+
+// Detect which provider is @mentioned
+const HANDLE_MAP = {
   '@claude': 'claude', '@chatgpt': 'chatgpt', '@gpt': 'chatgpt',
   '@gemini': 'gemini', '@grok': 'grok', '@ai': null,
 };
 
-const MODEL_PLACEHOLDERS = {
-  claude: 'sk-ant-...', chatgpt: 'sk-...', gemini: 'AIza...', grok: 'xai-...',
-};
-
-const MODEL_HINTS = {
-  claude: 'console.anthropic.com', chatgpt: 'platform.openai.com',
-  gemini: 'aistudio.google.com', grok: 'console.x.ai',
-};
+function detectProvider(text, enabledProviders) {
+  const lower = text.toLowerCase();
+  for (const [handle, provider] of Object.entries(HANDLE_MAP)) {
+    if (lower.includes(handle)) {
+      return provider === null ? (enabledProviders[0] || null) : provider;
+    }
+  }
+  return null;
+}
 
 function formatTime(iso) {
   const d = new Date(iso);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function detectMentionedModel(text, enabledModels) {
-  const lower = text.toLowerCase();
-  for (const [handle, model] of Object.entries(MODEL_HANDLES)) {
-    if (lower.includes(handle)) {
-      if (model === null) return enabledModels[0] || null;
-      return model;
-    }
-  }
-  return null;
-}
-
 export default function Room() {
   const { roomId } = useParams();
   const navigate = useNavigate();
 
-  const storedKeys = sessionStorage.getItem(`apiKeys_${roomId}`);
-  const isHost = !!storedKeys;
+  // Per-user keys stored in sessionStorage as { provider: { key, model } }
+  const getMyKeys = () => JSON.parse(sessionStorage.getItem(`keys_${roomId}`) || '{}');
+  const saveMyKeys = (keys) => sessionStorage.setItem(`keys_${roomId}`, JSON.stringify(keys));
 
-  // Join state — shown when no name is stored for this room
+  // Join state
   const [joined, setJoined] = useState(!!sessionStorage.getItem(`name_${roomId}`));
   const [myName, setMyName] = useState(sessionStorage.getItem(`name_${roomId}`) || '');
   const [joinName, setJoinName] = useState('');
@@ -54,32 +76,39 @@ export default function Room() {
   const [joinError, setJoinError] = useState('');
 
   const [room, setRoom] = useState(null);
-  const [enabledModels, setEnabledModels] = useState([]);
+  const [enabledProviders, setEnabledProviders] = useState([]); // providers with keys in D1 (host)
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [aiTyping, setAiTyping] = useState(null);
   const [copied, setCopied] = useState(false);
-  const [contextFor, setContextFor] = useState(null);
-  const [showEndConfirm, setShowEndConfirm] = useState(false);
-  const [missingKeyModel, setMissingKeyModel] = useState(null);
+  const [contextFor, setContextFor] = useState(null); // { provider, label }
+
+  // Add key modal
+  const [addKeyFor, setAddKeyFor] = useState(null); // provider string
   const [addKeyInput, setAddKeyInput] = useState('');
+  const [addKeyModel, setAddKeyModel] = useState('');
   const [addKeyLoading, setAddKeyLoading] = useState(false);
   const [addKeyError, setAddKeyError] = useState('');
+
+  // End meeting
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const isHost = !!sessionStorage.getItem(`keys_${roomId}`) &&
+    Object.keys(getMyKeys()).length > 0 &&
+    sessionStorage.getItem(`name_${roomId}`) !== null;
 
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
   const lastTimestampRef = useRef(null);
   const pollTimerRef = useRef(null);
 
-  // Always load room info (needed for join screen too)
   useEffect(() => {
     fetch(`${API}/api/rooms/${roomId}`)
       .then(r => r.json())
       .then(data => {
         if (data.error) { navigate('/'); return; }
         setRoom(data);
-        setEnabledModels(data.enabledModels || []);
+        setEnabledProviders(data.enabledModels || []);
       })
       .catch(() => navigate('/'));
   }, [roomId, navigate]);
@@ -102,32 +131,22 @@ export default function Room() {
     }
   }
 
-  // Fetch messages
   const fetchMessages = useCallback(async (incremental = false) => {
     try {
       const url = incremental && lastTimestampRef.current
         ? `${API}/api/rooms/${roomId}/messages?since=${encodeURIComponent(lastTimestampRef.current)}`
         : `${API}/api/rooms/${roomId}/messages`;
-
       const res = await fetch(url);
       if (!res.ok) return;
       const data = await res.json();
-
       if (data.length > 0) {
         lastTimestampRef.current = data[data.length - 1].created_at;
-        if (incremental) {
-          setMessages(prev => [...prev, ...data]);
-        } else {
-          setMessages(data);
-        }
+        setMessages(prev => incremental ? [...prev, ...data] : data);
       }
       setLoading(false);
-    } catch (_) {
-      setLoading(false);
-    }
+    } catch (_) { setLoading(false); }
   }, [roomId]);
 
-  // Only start polling after joined
   useEffect(() => {
     if (!joined) return;
     fetchMessages(false).then(() => {
@@ -156,10 +175,15 @@ export default function Room() {
   function handleSend() {
     const val = input.trim();
     if (!val) return;
-    const mentionedModel = detectMentionedModel(val, enabledModels);
-    if (mentionedModel) {
-      if (!enabledModels.includes(mentionedModel)) { setMissingKeyModel(mentionedModel); return; }
-      setContextFor(mentionedModel);
+    const provider = detectProvider(val, enabledProviders);
+    if (provider) {
+      const myKeys = getMyKeys();
+      if (!myKeys[provider]) {
+        // No key — show add key modal
+        openAddKey(provider);
+        return;
+      }
+      setContextFor({ provider, label: PROVIDER_LABELS[provider] });
     } else {
       postMessage(myName, val);
       setInput('');
@@ -171,10 +195,37 @@ export default function Room() {
     }
   }
 
+  function openAddKey(provider) {
+    setAddKeyFor(provider);
+    setAddKeyInput('');
+    setAddKeyModel(PROVIDER_MODELS[provider][0].id);
+    setAddKeyError('');
+  }
+
+  function saveKey() {
+    if (!addKeyInput.trim()) return;
+    setAddKeyLoading(true);
+    try {
+      const myKeys = getMyKeys();
+      myKeys[addKeyFor] = { key: addKeyInput.trim(), model: addKeyModel };
+      saveMyKeys(myKeys);
+      setAddKeyFor(null);
+      // Now trigger context picker for the provider they just added
+      setContextFor({ provider: addKeyFor, label: PROVIDER_LABELS[addKeyFor] });
+    } catch (err) {
+      setAddKeyError(err.message);
+    } finally {
+      setAddKeyLoading(false);
+    }
+  }
+
   async function askAI(selectedMessages) {
-    const model = contextFor;
+    const { provider } = contextFor;
+    const myKeys = getMyKeys();
+    const { key, model } = myKeys[provider];
+
     setContextFor(null);
-    setAiTyping(model);
+    setAiTyping(provider);
 
     const aiMessages = selectedMessages.map(m => ({
       role: m.is_claude ? 'assistant' : 'user',
@@ -190,41 +241,15 @@ export default function Room() {
       const res = await fetch(`${API}/api/ai`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roomId, model, messages: aiMessages }),
+        body: JSON.stringify({ roomId, provider, model, apiKey: key, messages: aiMessages }),
       });
       const data = await res.json();
-      if (data.error === 'no_key') { setAiTyping(null); setMissingKeyModel(model); return; }
       if (data.error) throw new Error(data.error);
-      await postMessage(model, data.text, true, model);
+      await postMessage(`${PROVIDER_LABELS[provider]} (${model})`, data.text, true, provider);
     } catch (err) {
       alert(`AI error: ${err.message}`);
     } finally {
       setAiTyping(null);
-    }
-  }
-
-  async function handleAddKey() {
-    if (!addKeyInput.trim()) return;
-    setAddKeyLoading(true);
-    setAddKeyError('');
-    try {
-      const res = await fetch(`${API}/api/rooms/${roomId}/keys`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: missingKeyModel, apiKey: addKeyInput.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to add key');
-      const existing = JSON.parse(storedKeys || '{}');
-      existing[missingKeyModel] = addKeyInput.trim();
-      sessionStorage.setItem(`apiKeys_${roomId}`, JSON.stringify(existing));
-      setEnabledModels(data.enabledModels);
-      setMissingKeyModel(null);
-      setAddKeyInput('');
-    } catch (err) {
-      setAddKeyError(err.message);
-    } finally {
-      setAddKeyLoading(false);
     }
   }
 
@@ -240,6 +265,11 @@ export default function Room() {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  // All providers anyone has keys for (union of host's D1 keys + my session keys)
+  const myProviders = Object.keys(getMyKeys());
+  const allProviders = [...new Set([...enabledProviders, ...myProviders])];
+  const handleHint = allProviders.map(p => `@${p === 'chatgpt' ? 'gpt' : p}`).join(', ');
+
   // ── Join screen ──────────────────────────────────────────────────────────
   if (!joined) {
     return (
@@ -250,10 +280,10 @@ export default function Room() {
             <div className="join-room-info">
               <div className="join-room-label">You're joining</div>
               <div className="join-room-name">{room.name}</div>
-              {enabledModels.length > 0 && (
+              {enabledProviders.length > 0 && (
                 <div className="join-room-models">
-                  {enabledModels.map(m => (
-                    <span key={m} className="model-badge">{MODEL_LABELS[m]}</span>
+                  {enabledProviders.map(p => (
+                    <span key={p} className="model-badge">{PROVIDER_LABELS[p]}</span>
                   ))}
                 </div>
               )}
@@ -265,8 +295,7 @@ export default function Room() {
               <input className="form-input" placeholder="How others will see you"
                 value={joinName} onChange={e => setJoinName(e.target.value)} autoFocus />
             </div>
-            <button className="btn-primary" type="submit"
-              disabled={joinLoading || !joinName.trim()}>
+            <button className="btn-primary" type="submit" disabled={joinLoading || !joinName.trim()}>
               {joinLoading ? 'Joining…' : 'Join meeting →'}
             </button>
             {joinError && <div className="error-msg">{joinError}</div>}
@@ -276,18 +305,16 @@ export default function Room() {
     );
   }
 
-  // ── Chat screen ──────────────────────────────────────────────────────────
-  const modelHandleHint = enabledModels.map(m => `@${m === 'chatgpt' ? 'gpt' : m}`).join(', ');
-
   if (loading) return <div className="loading-screen"><div className="spinner" />Loading…</div>;
 
   return (
     <div className="room">
+      {/* Header */}
       <div className="room-header">
         <div className="room-header-left">
           <div className="room-name">{room?.name || roomId}</div>
           <div className="room-users">
-            {enabledModels.map(m => <span key={m} className="model-badge">{MODEL_LABELS[m]}</span>)}
+            {allProviders.map(p => <span key={p} className="model-badge">{PROVIDER_LABELS[p]}</span>)}
           </div>
         </div>
         <div className="room-header-right">
@@ -301,24 +328,22 @@ export default function Room() {
         </div>
       </div>
 
+      {/* Messages */}
       <div className="messages">
         {messages.map(msg => {
           const isMe = msg.sender_name === myName;
           const isAI = msg.is_claude;
-          const aiModel = msg.ai_model || 'claude';
-
           if (isAI) return (
             <div key={msg.id} className="msg-group">
               <div className="msg-row claude-row">
                 <div className="bubble claude">
-                  <div className="claude-label">{MODEL_LABELS[aiModel] || aiModel}</div>
+                  <div className="claude-label">{msg.sender_name}</div>
                   {msg.content}
                 </div>
                 <div className="msg-time">{formatTime(msg.created_at)}</div>
               </div>
             </div>
           );
-
           return (
             <div key={msg.id} className="msg-group">
               {!isMe && <div className="msg-sender-label">{msg.sender_name}</div>}
@@ -330,24 +355,24 @@ export default function Room() {
             </div>
           );
         })}
-
         {aiTyping && (
           <div className="msg-group">
             <div className="msg-row claude-row">
               <div className="typing-indicator">
                 <div className="typing-dot" /><div className="typing-dot" /><div className="typing-dot" />
               </div>
-              <div className="msg-time">{MODEL_LABELS[aiTyping]} is thinking…</div>
+              <div className="msg-time">{PROVIDER_LABELS[aiTyping]} is thinking…</div>
             </div>
           </div>
         )}
         <div ref={bottomRef} />
       </div>
 
+      {/* Input */}
       <div className="input-area">
         <div className="input-row">
           <textarea ref={inputRef} className="msg-input"
-            placeholder={enabledModels.length > 0 ? `Message… (${modelHandleHint} to ask AI)` : 'Message…'}
+            placeholder={allProviders.length > 0 ? `Message… (${handleHint} to ask AI)` : 'Message…'}
             rows={1} value={input}
             onChange={e => {
               setInput(e.target.value);
@@ -364,12 +389,58 @@ export default function Room() {
         </div>
       </div>
 
+      {/* Context picker */}
       {contextFor && (
         <ContextPicker messages={messages}
-          modelLabel={MODEL_LABELS[contextFor]}
+          modelLabel={contextFor.label}
           onConfirm={askAI} onCancel={() => setContextFor(null)} />
       )}
 
+      {/* Add key modal */}
+      {addKeyFor && (
+        <div className="context-picker-overlay" onClick={() => setAddKeyFor(null)}>
+          <div className="end-confirm" onClick={e => e.stopPropagation()}>
+            <div className="end-confirm-title">Add your {PROVIDER_LABELS[addKeyFor]} key</div>
+            <div className="end-confirm-body">
+              Your key is used only in your browser — never shared with other participants.
+              Get one at <strong>{PROVIDER_HINTS[addKeyFor]}</strong>
+            </div>
+            <div className="form-group" style={{ marginBottom: 12 }}>
+              <label className="form-label">API Key</label>
+              <input className="form-input" placeholder={PROVIDER_PLACEHOLDERS[addKeyFor]}
+                type="password" value={addKeyInput}
+                onChange={e => setAddKeyInput(e.target.value)} autoFocus />
+            </div>
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="form-label">Model</label>
+              <div className="model-select-list">
+                {PROVIDER_MODELS[addKeyFor].map(m => (
+                  <button key={m.id}
+                    className={`model-select-row ${addKeyModel === m.id ? 'active' : ''}`}
+                    onClick={() => setAddKeyModel(m.id)}
+                    type="button">
+                    <div className={`model-select-check ${addKeyModel === m.id ? 'checked' : ''}`}>
+                      {addKeyModel === m.id && <svg width="10" height="10" viewBox="0 0 12 12" fill="white"><path d="M10 3L5 8.5 2 5.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>}
+                    </div>
+                    <span>{m.label}</span>
+                  </button>
+                ))}
+              </div>
+              {addKeyError && <div className="error-msg" style={{ marginTop: 6 }}>{addKeyError}</div>}
+            </div>
+            <div className="end-confirm-actions">
+              <button className="btn-cancel" onClick={() => setAddKeyFor(null)}>Cancel</button>
+              <button className="btn-ask-claude"
+                style={{ flex: 2, padding: 11, borderRadius: 'var(--radius-sm)', fontSize: 14, fontWeight: 500, cursor: 'pointer', border: 'none' }}
+                onClick={saveKey} disabled={!addKeyInput.trim() || addKeyLoading}>
+                {addKeyLoading ? 'Saving…' : `Use ${PROVIDER_LABELS[addKeyFor]}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* End meeting */}
       {showEndConfirm && (
         <div className="context-picker-overlay" onClick={() => setShowEndConfirm(false)}>
           <div className="end-confirm" onClick={e => e.stopPropagation()}>
@@ -379,45 +450,6 @@ export default function Room() {
               <button className="btn-cancel" onClick={() => setShowEndConfirm(false)}>Cancel</button>
               <button className="btn-end-confirm" onClick={handleEndMeeting}>End meeting</button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {missingKeyModel && (
-        <div className="context-picker-overlay" onClick={() => { setMissingKeyModel(null); setAddKeyInput(''); setAddKeyError(''); }}>
-          <div className="end-confirm" onClick={e => e.stopPropagation()}>
-            <div className="end-confirm-title">{MODEL_LABELS[missingKeyModel]} isn't enabled</div>
-            {isHost ? (
-              <>
-                <div className="end-confirm-body">
-                  Add a {MODEL_LABELS[missingKeyModel]} API key to use it in this meeting.
-                  Get one at <strong>{MODEL_HINTS[missingKeyModel]}</strong>
-                </div>
-                <div className="form-group" style={{ marginBottom: 16 }}>
-                  <input className="form-input" placeholder={MODEL_PLACEHOLDERS[missingKeyModel]}
-                    type="password" value={addKeyInput}
-                    onChange={e => setAddKeyInput(e.target.value)} autoFocus />
-                  {addKeyError && <div className="error-msg" style={{ marginTop: 6 }}>{addKeyError}</div>}
-                </div>
-                <div className="end-confirm-actions">
-                  <button className="btn-cancel" onClick={() => { setMissingKeyModel(null); setAddKeyInput(''); setAddKeyError(''); }}>Cancel</button>
-                  <button className="btn-ask-claude"
-                    style={{ flex: 2, padding: 11, borderRadius: 'var(--radius-sm)', fontSize: 14, fontWeight: 500, cursor: 'pointer', border: 'none' }}
-                    onClick={handleAddKey} disabled={!addKeyInput.trim() || addKeyLoading}>
-                    {addKeyLoading ? 'Adding…' : `Enable ${MODEL_LABELS[missingKeyModel]}`}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="end-confirm-body">
-                  {MODEL_LABELS[missingKeyModel]} hasn't been set up for this meeting. Ask the host to add a {MODEL_LABELS[missingKeyModel]} API key.
-                </div>
-                <div className="end-confirm-actions">
-                  <button className="btn-cancel" style={{ flex: 1 }} onClick={() => setMissingKeyModel(null)}>Got it</button>
-                </div>
-              </>
-            )}
           </div>
         </div>
       )}
