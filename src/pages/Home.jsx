@@ -93,9 +93,6 @@ export default function Home() {
     setLoading(true);
     setError('');
     try {
-      useEffect(() => {
-        addInfoToBackend();
-      }, []);
       // apiKeys for D1 — just the keys (workers don't need model choice)
       const apiKeys = Object.fromEntries(
         Object.entries(providers)
@@ -132,6 +129,10 @@ export default function Home() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    addInfoToBackend();
+  }, []);
 
   return (
     <div className="home">
