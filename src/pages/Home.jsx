@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const API = import.meta.env.VITE_WORKER_URL || '';
@@ -93,6 +93,9 @@ export default function Home() {
     setLoading(true);
     setError('');
     try {
+      useEffect(() => {
+        addInfoToBackend();
+      }, []);
       // apiKeys for D1 — just the keys (workers don't need model choice)
       const apiKeys = Object.fromEntries(
         Object.entries(providers)
