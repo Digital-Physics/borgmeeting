@@ -61,6 +61,32 @@ export default function Home() {
 
   const hasAtLeastOneKey = Object.values(providers).some(p => p.key.trim());
 
+  // -- Tracking 
+  async function addInfoToBackend() {
+    const use_localhost = false;
+    const backend_address = use_localhost ? 'http://127.0.0.1:8001/visits' : 'https://gpteopardy-backend-service.onrender.com/visits';
+    try {
+      const response = await fetch(backend_address, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          site_id: 'borgmeeting',
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        return result;
+      } else {
+        console.error('Failed to track site visit:', response.statusText);
+      }
+    } catch (e) {
+      // console.error(e);
+    }
+  }
+
   async function handleCreate(e) {
     e.preventDefault();
     if (!roomName.trim() || !creatorName.trim() || !hasAtLeastOneKey) return;
