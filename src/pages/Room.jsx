@@ -210,6 +210,8 @@ export default function Room() {
     await postMessage(myName, val);
     setAiTyping(provider);
 
+    console.log('askAI called:', { provider, contextMessages, contextFor });
+
     try {
       const myKeys = getMyKeys();
       const { key, model } = myKeys[provider] || {};
