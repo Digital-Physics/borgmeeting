@@ -414,10 +414,18 @@ export default function Room() {
       </div>
 
       {/* Context picker */}
-      {contextFor && (
+      {/* {contextFor && (
         <ContextPicker messages={messages}
           modelLabel={contextFor.label}
           onConfirm={askAI} onCancel={() => setContextFor(null)} />
+      )} */}
+      {contextFor && (
+        <ContextPicker
+          messages={messages}
+          modelLabel={contextFor.label}
+          onConfirm={(msgs) => askAI(contextFor.provider, msgs)}
+          onCancel={() => setContextFor(null)}
+        />
       )}
 
       {/* Add key modal */}
