@@ -4,6 +4,8 @@ import ContextPicker from '../components/ContextPicker.jsx';
 import { useSkin } from './SkinContext.jsx';
 import { AVATARS } from './skins.js';
 import SkinPicker from './SkinPicker.jsx';
+import ExportPicker from './ExportPicker.jsx';
+import { exportJSON, exportMarkdown, exportPDF } from './exportUtils.js';
 
 const API = import.meta.env.VITE_WORKER_URL || '';
 const POLL_INTERVAL = 2500;
@@ -103,6 +105,8 @@ export default function Room() {
   const [addKeyLoading, setAddKeyLoading] = useState(false);
   const [addKeyError, setAddKeyError] = useState('');
 
+  const [showExport, setShowExport] = useState(false);
+
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const isHost = !!sessionStorage.getItem(`keys_${roomId}`) &&
     Object.keys(getMyKeys()).length > 0 &&
@@ -199,6 +203,13 @@ export default function Room() {
       setInput('');
       if (inputRef.current) inputRef.current.style.height = 'auto';
     }
+  }
+
+  async function handleExport(format, selectedMessages) {
+    const roomName = room?.name || roomId;
+    if (format === 'json')     exportJSON(selectedMessages, roomName);
+    if (format === 'markdown') exportMarkdown(selectedMessages, roomName);
+    if (format === 'pdf')      exportPDF(selectedMessages, roomName, skin);
   }
 
   async function askAI(provider, contextMessages) {
@@ -375,6 +386,12 @@ export default function Room() {
         </div>
         <div className="room-header-right">
           <SkinPicker />
+          <button className="btn-export" onClick={() => setShowExport(true)} title="Export transcript">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 1a.5.5 0 01.5.5v7.793l2.146-2.147a.5.5 0 01.708.708l-3 3a.5.5 0 01-.708 0l-3-3a.5.5 0 01.708-.708L7.5 9.293V1.5A.5.5 0 018 1zM2 13.5a.5.5 0 01.5-.5h11a.5.5 0 010 1h-11a.5.5 0 01-.5-.5z"/>
+            </svg>
+            Export
+          </button>
           <button className={`btn-invite ${copied ? 'copied' : ''}`} onClick={copyInviteLink}>
             {copied
               ? <><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>Copied!</>
@@ -465,6 +482,16 @@ export default function Room() {
           modelLabel={contextFor.label}
           onConfirm={(msgs) => askAI(contextFor.provider, msgs)}
           onCancel={() => setContextFor(null)}
+        />
+      )}
+
+      {showExport && (
+        <ExportPicker
+          messages={messages}
+          roomName={room?.name || roomId}
+          skin={skin}
+          onExport={handleExport}
+          onCancel={() => setShowExport(false)}
         />
       )}
 

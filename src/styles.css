@@ -1041,3 +1041,98 @@ a { color: inherit; text-decoration: none; }
   color: var(--text-primary);
   box-shadow: var(--shadow-sm);
 }
+
+/* ── Export picker ── */
+.export-picker-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+  color: var(--text-primary);
+}
+
+.export-footer {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.export-format-btns {
+  display: flex;
+  gap: 6px;
+  flex: 2;
+}
+
+.btn-export-format {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 10px 8px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font);
+}
+
+.btn-export-format:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  background: var(--surface);
+}
+
+.btn-export-format:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-export-pdf {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+.btn-export-pdf:hover:not(:disabled) {
+  opacity: 0.88;
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+
+/* Export spinner — tiny inline spinner */
+.export-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  opacity: 0.6;
+}
+
+/* Export button in room header */
+.btn-export {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+  cursor: pointer;
+  font-family: var(--font);
+}
+
+.btn-export:hover {
+  background: var(--border);
+  color: var(--text-primary);
+}
