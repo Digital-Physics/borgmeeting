@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-const MAX_CONTEXT = 20;
+const MAX_CONTEXT = 50;
 
 export default function ContextPicker({ messages, modelLabel = 'AI', onConfirm, onCancel }) {
   const recentMessages = messages.slice(-MAX_CONTEXT);

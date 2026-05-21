@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ContextPicker from '../components/ContextPicker.jsx';
+import { useSkin } from './SkinContext.jsx';
+import { AVATARS } from './skins.js';
+import SkinPicker from './SkinPicker.jsx';
 
 const API = import.meta.env.VITE_WORKER_URL || '';
 const POLL_INTERVAL = 2500;
@@ -60,15 +63,25 @@ function formatTime(iso) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// Guess which provider sent an AI message based on sender name
+function guessProvider(senderName) {
+  const lower = (senderName || '').toLowerCase();
+  if (lower.includes('claude')) return 'claude';
+  if (lower.includes('chatgpt') || lower.includes('gpt')) return 'chatgpt';
+  if (lower.includes('gemini')) return 'gemini';
+  if (lower.includes('grok')) return 'grok';
+  return 'claude'; // fallback
+}
+
 export default function Room() {
   const { roomId } = useParams();
   const navigate = useNavigate();
+  const { skin } = useSkin();
+  const avatars = AVATARS[skin.id] || AVATARS['light'];
 
-  // Per-user keys stored in sessionStorage as { provider: { key, model } }
   const getMyKeys = () => JSON.parse(sessionStorage.getItem(`keys_${roomId}`) || '{}');
   const saveMyKeys = (keys) => sessionStorage.setItem(`keys_${roomId}`, JSON.stringify(keys));
 
-  // Join state
   const [joined, setJoined] = useState(!!sessionStorage.getItem(`name_${roomId}`));
   const [myName, setMyName] = useState(sessionStorage.getItem(`name_${roomId}`) || '');
   const [joinName, setJoinName] = useState('');
@@ -76,22 +89,20 @@ export default function Room() {
   const [joinError, setJoinError] = useState('');
 
   const [room, setRoom] = useState(null);
-  const [enabledProviders, setEnabledProviders] = useState([]); // providers with keys in D1 (host)
+  const [enabledProviders, setEnabledProviders] = useState([]);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [aiTyping, setAiTyping] = useState(null);
   const [copied, setCopied] = useState(false);
-  const [contextFor, setContextFor] = useState(null); // { provider, label }
+  const [contextFor, setContextFor] = useState(null);
 
-  // Add key modal
-  const [addKeyFor, setAddKeyFor] = useState(null); // provider string
+  const [addKeyFor, setAddKeyFor] = useState(null);
   const [addKeyInput, setAddKeyInput] = useState('');
   const [addKeyModel, setAddKeyModel] = useState('');
   const [addKeyLoading, setAddKeyLoading] = useState(false);
   const [addKeyError, setAddKeyError] = useState('');
 
-  // End meeting
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const isHost = !!sessionStorage.getItem(`keys_${roomId}`) &&
     Object.keys(getMyKeys()).length > 0 &&
@@ -179,7 +190,6 @@ export default function Room() {
     if (provider) {
       const myKeys = getMyKeys();
       if (!myKeys[provider]) {
-        // No key — show add key modal
         openAddKey(provider);
         return;
       }
@@ -187,31 +197,59 @@ export default function Room() {
     } else {
       postMessage(myName, val);
       setInput('');
-      if (inputRef.current) {
-        inputRef.current.style.height = 'auto';
-        inputRef.current.blur();
-        setTimeout(() => inputRef.current?.focus(), 50);
-      }
+      if (inputRef.current) inputRef.current.style.height = 'auto';
     }
+  }
+
+  async function askAI(provider, contextMessages) {
+    const val = input.trim();
+    setInput('');
+    if (inputRef.current) inputRef.current.style.height = 'auto';
+    setContextFor(null);
+
+    await postMessage(myName, val);
+    setAiTyping(provider);
+
+    try {
+      const myKeys = getMyKeys();
+      const { key, model } = myKeys[provider] || {};
+      const res = await fetch(`${API}/api/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, key, model, messages: contextMessages, prompt: val }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'AI error');
+      await postMessage(PROVIDER_LABELS[provider], data.content, true, model);
+    } catch (err) {
+      await postMessage('System', `Error from ${PROVIDER_LABELS[provider]}: ${err.message}`, false);
+    } finally {
+      setAiTyping(null);
+    }
+  }
+
+  function copyInviteLink() {
+    navigator.clipboard.writeText(window.location.href);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }
 
   function openAddKey(provider) {
     setAddKeyFor(provider);
     setAddKeyInput('');
-    setAddKeyModel(PROVIDER_MODELS[provider][0].id);
+    setAddKeyModel(PROVIDER_MODELS[provider][0]?.id || '');
     setAddKeyError('');
   }
 
-  function saveKey() {
-    if (!addKeyInput.trim()) return;
+  async function saveKey() {
+    if (!addKeyInput.trim() || !addKeyFor) return;
     setAddKeyLoading(true);
+    setAddKeyError('');
     try {
       const myKeys = getMyKeys();
       myKeys[addKeyFor] = { key: addKeyInput.trim(), model: addKeyModel };
       saveMyKeys(myKeys);
       setAddKeyFor(null);
-      // Now trigger context picker for the provider they just added
-      setContextFor({ provider: addKeyFor, label: PROVIDER_LABELS[addKeyFor] });
     } catch (err) {
       setAddKeyError(err.message);
     } finally {
@@ -219,56 +257,13 @@ export default function Room() {
     }
   }
 
-  async function askAI(selectedMessages) {
-    const { provider } = contextFor;
-    const myKeys = getMyKeys();
-    const { key, model } = myKeys[provider];
-
-    // ADD THIS:
-    console.log('DEBUG askAI:', { provider, model, keyPrefix: key?.slice(0, 10), keyLength: key?.length });
-
-    setContextFor(null);
-    setAiTyping(provider);
-
-    const aiMessages = selectedMessages.map(m => ({
-      role: m.is_claude ? 'assistant' : 'user',
-      content: m.is_claude ? m.content : `${m.sender_name}: ${m.content}`,
-    }));
-    aiMessages.push({ role: 'user', content: `${myName}: ${input.trim()}` });
-
-    await postMessage(myName, input.trim());
-    setInput('');
-    if (inputRef.current) inputRef.current.style.height = 'auto';
-
-    try {
-      const res = await fetch(`${API}/api/ai`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roomId, provider, model, apiKey: key, messages: aiMessages }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      await postMessage(`${PROVIDER_LABELS[provider]} (${model})`, data.text, true, provider);
-    } catch (err) {
-      alert(`AI error: ${err.message}`);
-    } finally {
-      setAiTyping(null);
-    }
-  }
-
   async function handleEndMeeting() {
-    setShowEndConfirm(false);
-    await fetch(`${API}/api/rooms/${roomId}`, { method: 'DELETE' });
+    try {
+      await fetch(`${API}/api/rooms/${roomId}`, { method: 'DELETE' });
+    } catch (_) {}
     navigate('/');
   }
 
-  function copyInviteLink() {
-    navigator.clipboard.writeText(`${window.location.origin}/room/${roomId}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
-  // All providers anyone has keys for (union of host's D1 keys + my session keys)
   const myProviders = Object.keys(getMyKeys());
   const allProviders = [...new Set([...enabledProviders, ...myProviders])];
   const handleHint = allProviders.map(p => `@${p === 'chatgpt' ? 'gpt' : p}`).join(', ');
@@ -277,11 +272,21 @@ export default function Room() {
   if (!joined) {
     return (
       <div className="home">
+        <div className="home-skin-picker"><SkinPicker /></div>
         <div className="home-card">
-          <div className="home-logo">Borg<span>Meeting</span></div>
+          {/* Avatars */}
+          <div className="home-avatars">
+            {['claude','chatgpt','gemini','grok'].map(p => (
+              <div key={p} className="home-avatar"
+                dangerouslySetInnerHTML={{ __html: avatars[p] }} title={PROVIDER_LABELS[p]} />
+            ))}
+          </div>
+          <div className="home-logo">
+            {skin.appName}{skin.appNameSpan && <span>{skin.appNameSpan}</span>}
+          </div>
           {room && (
             <div className="join-room-info">
-              <div className="join-room-label">You're joining</div>
+              <div className="join-room-label">{skin.joiningLabel}</div>
               <div className="join-room-name">{room.name}</div>
               {enabledProviders.length > 0 && (
                 <div className="join-room-models">
@@ -294,12 +299,12 @@ export default function Room() {
           )}
           <form onSubmit={handleJoin}>
             <div className="form-group">
-              <label className="form-label">Your name</label>
-              <input className="form-input" placeholder="How others will see you"
+              <label className="form-label">{skin.yourNameLabel}</label>
+              <input className="form-input" placeholder={skin.yourNamePlaceholder}
                 value={joinName} onChange={e => setJoinName(e.target.value)} autoFocus />
             </div>
             <button className="btn-primary" type="submit" disabled={joinLoading || !joinName.trim()}>
-              {joinLoading ? 'Joining…' : 'Join meeting →'}
+              {joinLoading ? 'Joining…' : skin.joinBtn}
             </button>
             {joinError && <div className="error-msg">{joinError}</div>}
           </form>
@@ -317,10 +322,19 @@ export default function Room() {
         <div className="room-header-left">
           <div className="room-name">{room?.name || roomId}</div>
           <div className="room-users">
-            {allProviders.map(p => <span key={p} className="model-badge">{PROVIDER_LABELS[p]}</span>)}
+            {allProviders.map(p => (
+              <span key={p} className="model-badge">
+                <span
+                  style={{ display:'inline-block', width:12, height:12, borderRadius:'50%', overflow:'hidden', verticalAlign:'middle', marginRight:3 }}
+                  dangerouslySetInnerHTML={{ __html: avatars[p] }}
+                />
+                {PROVIDER_LABELS[p]}
+              </span>
+            ))}
           </div>
         </div>
         <div className="room-header-right">
+          <SkinPicker />
           <button className={`btn-invite ${copied ? 'copied' : ''}`} onClick={copyInviteLink}>
             {copied
               ? <><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>Copied!</>
@@ -336,17 +350,24 @@ export default function Room() {
         {messages.map(msg => {
           const isMe = msg.sender_name === myName;
           const isAI = msg.is_claude;
-          if (isAI) return (
-            <div key={msg.id} className="msg-group">
-              <div className="msg-row claude-row">
-                <div className="bubble claude">
-                  <div className="claude-label">{msg.sender_name}</div>
-                  {msg.content}
+          if (isAI) {
+            const provider = guessProvider(msg.sender_name);
+            return (
+              <div key={msg.id} className="msg-group">
+                <div className="msg-row claude-row">
+                  <div className="bubble claude">
+                    <div className="claude-label-row">
+                      <div className="claude-label-avatar"
+                        dangerouslySetInnerHTML={{ __html: avatars[provider] }} />
+                      <span className="claude-label">{msg.sender_name}</span>
+                    </div>
+                    {msg.content}
+                  </div>
+                  <div className="msg-time">{formatTime(msg.created_at)}</div>
                 </div>
-                <div className="msg-time">{formatTime(msg.created_at)}</div>
               </div>
-            </div>
-          );
+            );
+          }
           return (
             <div key={msg.id} className="msg-group">
               {!isMe && <div className="msg-sender-label">{msg.sender_name}</div>}

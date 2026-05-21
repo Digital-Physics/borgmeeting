@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useSkin } from './SkinContext.jsx';
+import { AVATARS } from './skins.js';
+import SkinPicker from './SkinPicker.jsx';
 
 const API = import.meta.env.VITE_WORKER_URL || '';
 
@@ -40,13 +43,13 @@ const DEFAULT_MODEL = {
 
 export default function Home() {
   const navigate = useNavigate();
+  const { skin } = useSkin();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const [roomName, setRoomName] = useState('');
   const [creatorName, setCreatorName] = useState('');
 
-  // Per provider: { key, model, expanded }
   const [providers, setProviders] = useState(
     Object.fromEntries(PROVIDERS.map(p => [p.id, { key: '', model: DEFAULT_MODEL[p.id], expanded: false }]))
   );
@@ -55,36 +58,20 @@ export default function Home() {
     setProviders(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
   }
 
-  function toggleExpanded(id) {
-    setProviders(prev => ({ ...prev, [id]: { ...prev[id], expanded: !prev[id].expanded } }));
-  }
-
   const hasAtLeastOneKey = Object.values(providers).some(p => p.key.trim());
+  const avatars = AVATARS[skin.id] || AVATARS['light'];
 
-  // -- Tracking 
   async function addInfoToBackend() {
     const use_localhost = false;
     const backend_address = use_localhost ? 'http://127.0.0.1:8001/visits' : 'https://gpteopardy-backend-service.onrender.com/visits';
     try {
       const response = await fetch(backend_address, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          site_id: 'borgmeeting',
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ site_id: 'borgmeeting' })
       });
-
-      if (response.ok) {
-        const result = await response.json();
-        return result;
-      } else {
-        console.error('Failed to track site visit:', response.statusText);
-      }
-    } catch (e) {
-      // console.error(e);
-    }
+      if (response.ok) return await response.json();
+    } catch (e) { /* silent */ }
   }
 
   async function handleCreate(e) {
@@ -93,7 +80,6 @@ export default function Home() {
     setLoading(true);
     setError('');
     try {
-      // apiKeys for D1 — just the keys (workers don't need model choice)
       const apiKeys = Object.fromEntries(
         Object.entries(providers)
           .filter(([_, p]) => p.key.trim())
@@ -114,7 +100,6 @@ export default function Home() {
 
       sessionStorage.setItem(`name_${data.roomId}`, creatorName.trim());
 
-      // Store full key + model choice per provider in session
       const keyStore = Object.fromEntries(
         Object.entries(providers)
           .filter(([_, p]) => p.key.trim())
@@ -130,25 +115,43 @@ export default function Home() {
     }
   }
 
-  useEffect(() => {
-    addInfoToBackend();
-  }, []);
+  useEffect(() => { addInfoToBackend(); }, []);
 
   return (
     <div className="home">
+      {/* Floating skin picker in top-right */}
+      <div className="home-skin-picker">
+        <SkinPicker />
+      </div>
+
       <div className="home-card">
-        <div className="home-logo">Borg<span>Meeting</span></div>
-        <div className="home-tagline">Where humans and AI meet</div>
+        {/* AI Avatar row */}
+        <div className="home-avatars">
+          {PROVIDERS.map(p => (
+            <div
+              key={p.id}
+              className="home-avatar"
+              dangerouslySetInnerHTML={{ __html: avatars[p.id] }}
+              title={p.label}
+            />
+          ))}
+        </div>
+
+        <div className="home-logo">
+          {skin.appName}
+          {skin.appNameSpan && <span>{skin.appNameSpan}</span>}
+        </div>
+        <div className="home-tagline">{skin.tagline}</div>
 
         <form onSubmit={handleCreate}>
           <div className="form-group">
-            <label className="form-label">Your name</label>
-            <input className="form-input" placeholder="How others will see you"
+            <label className="form-label">{skin.yourNameLabel}</label>
+            <input className="form-input" placeholder={skin.yourNamePlaceholder}
               value={creatorName} onChange={e => setCreatorName(e.target.value)} autoFocus />
           </div>
           <div className="form-group">
-            <label className="form-label">Meeting name</label>
-            <input className="form-input" placeholder="e.g. Strategy brainstorm"
+            <label className="form-label">{skin.meetingNameLabel}</label>
+            <input className="form-input" placeholder={skin.meetingNamePlaceholder}
               value={roomName} onChange={e => setRoomName(e.target.value)} />
           </div>
 
@@ -164,6 +167,11 @@ export default function Home() {
                 return (
                   <div key={p.id} className={`model-key-row ${isEnabled ? 'enabled' : ''}`}>
                     <div className="model-key-label">
+                      {/* Mini avatar */}
+                      <div
+                        className="model-key-avatar"
+                        dangerouslySetInnerHTML={{ __html: avatars[p.id] }}
+                      />
                       <span className="model-key-name">{p.label}</span>
                       {isEnabled && <span className="model-key-badge">enabled</span>}
                     </div>
@@ -177,7 +185,6 @@ export default function Home() {
                     />
                     <div className="form-hint" style={{ marginBottom: isEnabled ? 10 : 0 }}>{p.hint}</div>
 
-                    {/* Model selector — only shown when a key is entered */}
                     {isEnabled && (
                       <div className="model-select-list" style={{ marginTop: 4 }}>
                         {PROVIDER_MODELS[p.id].map(m => (
@@ -204,7 +211,7 @@ export default function Home() {
 
           <button className="btn-primary" type="submit"
             disabled={loading || !roomName.trim() || !creatorName.trim() || !hasAtLeastOneKey}>
-            {loading ? 'Creating…' : 'Start meeting →'}
+            {loading ? 'Creating…' : skin.startBtn}
           </button>
           {error && <div className="error-msg">{error}</div>}
         </form>
