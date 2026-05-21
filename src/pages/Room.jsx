@@ -215,6 +215,10 @@ export default function Room() {
     try {
       const myKeys = getMyKeys();
       const { key, model } = myKeys[provider] || {};
+
+      console.log('myKeys:', myKeys);
+      console.log('key:', key, 'model:', model, 'provider:', provider);
+
       const res = await fetch(`${API}/api/ai`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
