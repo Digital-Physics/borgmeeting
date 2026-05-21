@@ -202,37 +202,71 @@ export default function Room() {
   }
 
   async function askAI(provider, contextMessages) {
-    const val = input.trim();
-    setInput('');
-    if (inputRef.current) inputRef.current.style.height = 'auto';
-    setContextFor(null);
+    const myKeys = getMyKeys();
+    const { key, model } = myKeys[provider];
 
-    await postMessage(myName, val);
+    setContextFor(null);
     setAiTyping(provider);
 
-    console.log('askAI called:', { provider, contextMessages, contextFor });
+    const aiMessages = contextMessages.map(m => ({
+      role: m.is_claude ? 'assistant' : 'user',
+      content: m.is_claude ? m.content : `${m.sender_name}: ${m.content}`,
+    }));
+    aiMessages.push({ role: 'user', content: `${myName}: ${input.trim()}` });
+
+    await postMessage(myName, input.trim());
+    setInput('');
+    if (inputRef.current) inputRef.current.style.height = 'auto';
 
     try {
-      const myKeys = getMyKeys();
-      const { key, model } = myKeys[provider] || {};
-
-      console.log('myKeys:', myKeys);
-      console.log('key:', key, 'model:', model, 'provider:', provider);
-
       const res = await fetch(`${API}/api/ai`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, key, model, messages: contextMessages, prompt: val }),
+        body: JSON.stringify({ roomId, provider, model, apiKey: key, messages: aiMessages }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'AI error');
-      await postMessage(PROVIDER_LABELS[provider], data.content, true, model);
+      if (data.error) throw new Error(data.error);
+      await postMessage(`${PROVIDER_LABELS[provider]} (${model})`, data.text, true, provider);
     } catch (err) {
-      await postMessage('System', `Error from ${PROVIDER_LABELS[provider]}: ${err.message}`, false);
+      alert(`AI error: ${err.message}`);
     } finally {
       setAiTyping(null);
     }
   }
+
+  // async function askAI(provider, contextMessages) {
+  //   const val = input.trim();
+  //   setInput('');
+  //   if (inputRef.current) inputRef.current.style.height = 'auto';
+  //   setContextFor(null);
+
+  //   await postMessage(myName, val);
+  //   setAiTyping(provider);
+
+  //   console.log('askAI called:', { provider, contextMessages, contextFor });
+
+  //   try {
+  //     const myKeys = getMyKeys();
+  //     const { key, model } = myKeys[provider] || {};
+
+  //     console.log('myKeys:', myKeys);
+  //     console.log('key:', key, 'model:', model, 'provider:', provider);
+
+  //     const res = await fetch(`${API}/api/ai`, {
+  //       method: 'POST',
+  //       headers: { 'Content-Type': 'application/json' },
+  //       body: JSON.stringify({ provider, key, model, messages: contextMessages, prompt: val }),
+  //     });
+  //     const data = await res.json();
+  //     if (!res.ok) throw new Error(data.error || 'AI error');
+  //     await postMessage(PROVIDER_LABELS[provider], data.content, true, model);
+  //   } catch (err) {
+  //     await postMessage('System', `Error from ${PROVIDER_LABELS[provider]}: ${err.message}`, false);
+  //   } finally {
+  //     setAiTyping(null);
+  //   }
+  // }
+  
 
   function copyInviteLink() {
     navigator.clipboard.writeText(window.location.href);
