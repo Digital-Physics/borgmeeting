@@ -100,3 +100,6 @@ For reference, limits enforced by the Worker itself (no dashboard config needed)
 | Model allowlist per provider | `Ai.js` handleAI |
 | API key prefix validation | `Ai.js` handleAI |
 | roomId format (12 hex chars) | `index.js` all room routes |
+
+
+# redeploy comment
