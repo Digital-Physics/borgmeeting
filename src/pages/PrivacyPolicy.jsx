@@ -42,12 +42,12 @@ export default function PrivacyPolicy() {
         <Section title="What we store">
           <ul>
             <li>
-              <strong>Room metadata</strong> - room name, creator name, creation date,
+              <strong>Room metadata.</strong> Room name, creator name, creation date,
               enabled AI providers, and auto-delete setting. This is unencrypted
-              because it has to be - it's needed to display the room to participants.
+              because it has to be. It's needed to display the room to participants.
             </li>
             <li>
-              <strong>Messages</strong> - stored as AES-GCM 256-bit encrypted ciphertext.
+              <strong>Messages.</strong> Stored as AES-GCM 256-bit encrypted ciphertext.
               The decryption key lives only in your room link (the <code>#key=</code> fragment).
               It is never sent to our server. We store noise.
             </li>
@@ -61,12 +61,12 @@ export default function PrivacyPolicy() {
         <Section title="What we don't store">
           <ul>
             <li>
-              <strong>Your API keys</strong> - they live in your browser's sessionStorage
+              <strong>Your API keys.</strong> They live in your browser's sessionStorage
               and are sent directly from your browser to the AI provider (Anthropic, OpenAI,
               Google, xAI). They never touch our server.
             </li>
             <li>
-              <strong>Your message content</strong> - we store ciphertext. Without the
+              <strong>Your message content.</strong> We store ciphertext. Without the
               room link, it is mathematically unreadable.
             </li>
           </ul>
