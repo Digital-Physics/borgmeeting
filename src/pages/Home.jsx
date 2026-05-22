@@ -3,14 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { useSkin } from './SkinContext.jsx';
 import { AVATARS } from './skins.js';
 import SkinPicker from './SkinPicker.jsx';
+import { generateRoomKey, exportKeyToBase64 } from './roomCrypto.js';
 
 const API = import.meta.env.VITE_WORKER_URL || '';
 
 const PROVIDERS = [
-  { id: 'claude',  label: 'Claude',  hint: 'console.anthropic.com', placeholder: 'sk-ant-...' },
-  { id: 'chatgpt', label: 'ChatGPT', hint: 'platform.openai.com',   placeholder: 'sk-...' },
-  { id: 'gemini',  label: 'Gemini',  hint: 'aistudio.google.com',   placeholder: 'AIza...' },
-  { id: 'grok',    label: 'Grok',    hint: 'console.x.ai',          placeholder: 'xai-...' },
+  { id: 'claude',  label: 'Claude',  hint: 'console.anthropic.com', placeholder: 'sk-ant-...', spendUrl: 'https://console.anthropic.com/settings/limits' },
+  { id: 'chatgpt', label: 'ChatGPT', hint: 'platform.openai.com',   placeholder: 'sk-...',     spendUrl: 'https://platform.openai.com/settings/organization/limits' },
+  { id: 'gemini',  label: 'Gemini',  hint: 'aistudio.google.com',   placeholder: 'AIza...',    spendUrl: 'https://console.cloud.google.com/apis/credentials' },
+  { id: 'grok',    label: 'Grok',    hint: 'console.x.ai',          placeholder: 'xai-...',    spendUrl: 'https://console.x.ai' },
 ];
 
 const PROVIDER_MODELS = {
@@ -49,6 +50,7 @@ export default function Home() {
 
   const [roomName, setRoomName] = useState('');
   const [creatorName, setCreatorName] = useState('');
+  const [ttlDays, setTtlDays] = useState(7);
 
   const [providers, setProviders] = useState(
     Object.fromEntries(PROVIDERS.map(p => [p.id, { key: '', model: DEFAULT_MODEL[p.id], expanded: false }]))
@@ -80,11 +82,11 @@ export default function Home() {
     setLoading(true);
     setError('');
     try {
-      const apiKeys = Object.fromEntries(
-        Object.entries(providers)
-          .filter(([_, p]) => p.key.trim())
-          .map(([id, p]) => [id, p.key.trim()])
-      );
+      // Derive which providers are enabled from which keys were entered.
+      // Keys are stored client-side only — never sent to the server.
+      const enabledProviders = Object.entries(providers)
+        .filter(([_, p]) => p.key.trim())
+        .map(([id]) => id);
 
       const res = await fetch(`${API}/api/rooms`, {
         method: 'POST',
@@ -92,12 +94,19 @@ export default function Home() {
         body: JSON.stringify({
           roomName: roomName.trim(),
           creatorName: creatorName.trim(),
-          apiKeys,
+          enabledProviders,
+          ttlDays,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create meeting');
 
+      // Generate the room encryption key client-side.
+      // It never leaves the browser — it lives only in the URL fragment.
+      const cryptoKey = await generateRoomKey();
+      const keyB64 = await exportKeyToBase64(cryptoKey);
+
+      // Store display name and keys in sessionStorage — API keys never leave the browser.
       sessionStorage.setItem(`name_${data.roomId}`, creatorName.trim());
 
       const keyStore = Object.fromEntries(
@@ -107,7 +116,9 @@ export default function Home() {
       );
       sessionStorage.setItem(`keys_${data.roomId}`, JSON.stringify(keyStore));
 
-      navigate(`/room/${data.roomId}`);
+      // Navigate with the encryption key in the URL fragment.
+      // Fragments are never sent to the server — the key stays client-side only.
+      navigate(`/room/${data.roomId}#key=${keyB64}`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -156,6 +167,33 @@ export default function Home() {
           </div>
 
           <div className="form-group">
+            <label className="form-label">Auto-delete after inactivity</label>
+            <div className="form-hint" style={{ marginBottom: 8 }}>
+              Room and all messages are permanently deleted after this period of inactivity.
+            </div>
+            <div className="model-select-list">
+              {[
+                { value: 1,  label: '24 hours',  sub: 'Quick sessions' },
+                { value: 7,  label: '7 days',    sub: 'Default' },
+                { value: 30, label: '30 days',   sub: 'Extended projects' },
+              ].map(opt => (
+                <button key={opt.value} type="button"
+                  className={`model-select-row ${ttlDays === opt.value ? 'active' : ''}`}
+                  onClick={() => setTtlDays(opt.value)}>
+                  <div className={`model-select-check ${ttlDays === opt.value ? 'checked' : ''}`}>
+                    {ttlDays === opt.value && (
+                      <svg width="10" height="10" viewBox="0 0 12 12" fill="white">
+                        <path d="M10 3L5 8.5 2 5.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                      </svg>
+                    )}
+                  </div>
+                  <span>{opt.label} <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>— {opt.sub}</span></span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-group">
             <label className="form-label">AI participants</label>
             <div className="form-hint" style={{ marginBottom: 10 }}>
               Add an API key for each AI you want. At least one required.
@@ -183,7 +221,18 @@ export default function Home() {
                       value={state.key}
                       onChange={e => setProviderField(p.id, 'key', e.target.value)}
                     />
-                    <div className="form-hint" style={{ marginBottom: isEnabled ? 10 : 0 }}>{p.hint}</div>
+                    <div className="form-hint" style={{ marginBottom: isEnabled ? 6 : 0 }}>{p.hint}</div>
+
+                    {isEnabled && (
+                      <div className="form-hint" style={{ marginBottom: 10, color: 'var(--text-secondary)' }}>
+                        ⚠ Set a spend limit before sharing this room —{' '}
+                        <a href={p.spendUrl} target="_blank" rel="noopener noreferrer"
+                          style={{ color: 'var(--accent)' }}>
+                          {p.hint} → billing
+                        </a>
+                        . Your key is stored in your browser only and never sent to our server.
+                      </div>
+                    )}
 
                     {isEnabled && (
                       <div className="model-select-list" style={{ marginTop: 4 }}>

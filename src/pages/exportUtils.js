@@ -44,7 +44,7 @@ export function exportJSON(messages, roomName) {
       id: m.id,
       sender: m.sender_name,
       content: m.content,
-      is_ai: !!m.is_claude,
+      is_ai: m.ai_model !== null,
       ai_model: m.ai_model || null,
       timestamp: m.created_at,
     })),
@@ -85,7 +85,7 @@ export function exportMarkdown(messages, roomName) {
       hour: '2-digit', minute: '2-digit',
     });
 
-    const sender = m.is_claude
+    const sender = m.ai_model !== null
       ? `**${m.sender_name}** *(AI)*`
       : `**${m.sender_name}**`;
 
@@ -124,7 +124,7 @@ export function exportPDF(messages, roomName, skin) {
     const date = new Date(m.created_at).toLocaleDateString([], {
       month: 'short', day: 'numeric',
     });
-    const isAI = !!m.is_claude;
+    const isAI = m.ai_model !== null;
     const content = escapeHtml(m.content).replace(/\n/g, '<br>');
 
     return `

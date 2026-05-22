@@ -6,6 +6,7 @@ import { AVATARS } from './skins.js';
 import SkinPicker from './SkinPicker.jsx';
 import ExportPicker from './ExportPicker.jsx';
 import { exportJSON, exportMarkdown, exportPDF } from './exportUtils.js';
+import { importKeyFromBase64, extractKeyFromHash, encryptMessage, decryptMessage } from './roomCrypto.js';
 
 const API = import.meta.env.VITE_WORKER_URL || '';
 const POLL_INTERVAL = 2500;
@@ -106,6 +107,7 @@ export default function Room() {
   const [addKeyError, setAddKeyError] = useState('');
 
   const [showExport, setShowExport] = useState(false);
+  const [sendError, setSendError] = useState(''); // inline error beneath the input
 
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const isHost = !!sessionStorage.getItem(`keys_${roomId}`) &&
@@ -116,6 +118,21 @@ export default function Room() {
   const inputRef = useRef(null);
   const lastTimestampRef = useRef(null);
   const pollTimerRef = useRef(null);
+  const cryptoKeyRef = useRef(null);    // AES-GCM CryptoKey, never stored in state
+
+  const [cryptoError, setCryptoError] = useState(null); // null | 'missing' | 'invalid'
+
+  // ── Parse encryption key from URL fragment on mount ─────────────────────
+  useEffect(() => {
+    const keyB64 = extractKeyFromHash(window.location.hash);
+    if (!keyB64) {
+      setCryptoError('missing');
+      return;
+    }
+    importKeyFromBase64(keyB64)
+      .then(key => { cryptoKeyRef.current = key; })
+      .catch(() => setCryptoError('invalid'));
+  }, []);
 
   useEffect(() => {
     fetch(`${API}/api/rooms/${roomId}`)
@@ -155,8 +172,17 @@ export default function Room() {
       if (!res.ok) return;
       const data = await res.json();
       if (data.length > 0) {
-        lastTimestampRef.current = data[data.length - 1].created_at;
-        setMessages(prev => incremental ? [...prev, ...data] : data);
+        // Decrypt each message; fall back to '[encrypted]' if key is missing or decryption fails
+        const decrypted = await Promise.all(data.map(async msg => {
+          if (!cryptoKeyRef.current) return { ...msg, content: '[encrypted]' };
+          try {
+            return { ...msg, content: await decryptMessage(cryptoKeyRef.current, msg.content) };
+          } catch {
+            return { ...msg, content: '[encrypted]' };
+          }
+        }));
+        lastTimestampRef.current = decrypted[decrypted.length - 1].created_at;
+        setMessages(prev => incremental ? [...prev, ...decrypted] : decrypted);
       }
       setLoading(false);
     } catch (_) { setLoading(false); }
@@ -174,12 +200,19 @@ export default function Room() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, aiTyping]);
 
-  async function postMessage(senderName, content, isClaude = false, aiModel = null) {
-    await fetch(`${API}/api/rooms/${roomId}/messages`, {
+  async function postMessage(senderName, content, aiModel = null) {
+    const encryptedContent = cryptoKeyRef.current
+      ? await encryptMessage(cryptoKeyRef.current, content)
+      : content;
+    const res = await fetch(`${API}/api/rooms/${roomId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ senderName, content, isClaude, aiModel }),
+      body: JSON.stringify({ senderName, content: encryptedContent, aiModel }),
     });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Failed to send (${res.status})`);
+    }
     await fetchMessages(true);
   }
 
@@ -190,6 +223,7 @@ export default function Room() {
   function handleSend() {
     const val = input.trim();
     if (!val) return;
+    setSendError('');
     const provider = detectProvider(val, enabledProviders);
     if (provider) {
       const myKeys = getMyKeys();
@@ -199,9 +233,12 @@ export default function Room() {
       }
       setContextFor({ provider, label: PROVIDER_LABELS[provider] });
     } else {
-      postMessage(myName, val);
-      setInput('');
-      if (inputRef.current) inputRef.current.style.height = 'auto';
+      postMessage(myName, val)
+        .then(() => {
+          setInput('');
+          if (inputRef.current) inputRef.current.style.height = 'auto';
+        })
+        .catch(err => setSendError(err.message));
     }
   }
 
@@ -220,8 +257,8 @@ export default function Room() {
     setAiTyping(provider);
 
     const aiMessages = contextMessages.map(m => ({
-      role: m.is_claude ? 'assistant' : 'user',
-      content: m.is_claude ? m.content : `${m.sender_name}: ${m.content}`,
+      role: m.ai_model !== null ? 'assistant' : 'user',
+      content: m.ai_model !== null ? m.content : `${m.sender_name}: ${m.content}`,
     }));
     aiMessages.push({ role: 'user', content: `${myName}: ${input.trim()}` });
 
@@ -237,47 +274,14 @@ export default function Room() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      await postMessage(`${PROVIDER_LABELS[provider]} (${model})`, data.text, true, provider);
+      await postMessage(`${PROVIDER_LABELS[provider]} (${model})`, data.text, provider);
     } catch (err) {
-      alert(`AI error: ${err.message}`);
+      setSendError(`${PROVIDER_LABELS[provider]} error: ${err.message}`);
     } finally {
       setAiTyping(null);
     }
   }
 
-  // async function askAI(provider, contextMessages) {
-  //   const val = input.trim();
-  //   setInput('');
-  //   if (inputRef.current) inputRef.current.style.height = 'auto';
-  //   setContextFor(null);
-
-  //   await postMessage(myName, val);
-  //   setAiTyping(provider);
-
-  //   console.log('askAI called:', { provider, contextMessages, contextFor });
-
-  //   try {
-  //     const myKeys = getMyKeys();
-  //     const { key, model } = myKeys[provider] || {};
-
-  //     console.log('myKeys:', myKeys);
-  //     console.log('key:', key, 'model:', model, 'provider:', provider);
-
-  //     const res = await fetch(`${API}/api/ai`, {
-  //       method: 'POST',
-  //       headers: { 'Content-Type': 'application/json' },
-  //       body: JSON.stringify({ provider, key, model, messages: contextMessages, prompt: val }),
-  //     });
-  //     const data = await res.json();
-  //     if (!res.ok) throw new Error(data.error || 'AI error');
-  //     await postMessage(PROVIDER_LABELS[provider], data.content, true, model);
-  //   } catch (err) {
-  //     await postMessage('System', `Error from ${PROVIDER_LABELS[provider]}: ${err.message}`, false);
-  //   } finally {
-  //     setAiTyping(null);
-  //   }
-  // }
-  
 
   function copyInviteLink() {
     navigator.clipboard.writeText(window.location.href);
@@ -315,9 +319,45 @@ export default function Room() {
     navigate('/');
   }
 
+  async function handleReport() {
+    const reason = window.prompt('Briefly describe the issue (optional):');
+    if (reason === null) return; // user cancelled
+    try {
+      await fetch(`${API}/api/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId, reason }),
+      });
+      alert('Report submitted. Thank you.');
+    } catch {
+      alert('Could not submit report. Please try again.');
+    }
+  }
+
   const myProviders = Object.keys(getMyKeys());
   const allProviders = [...new Set([...enabledProviders, ...myProviders])];
   const handleHint = allProviders.map(p => `@${p === 'chatgpt' ? 'gpt' : p}`).join(', ');
+
+  // ── Crypto error screen ───────────────────────────────────────────────────
+  if (cryptoError) {
+    const isMissing = cryptoError === 'missing';
+    return (
+      <div className="home">
+        <div className="home-card" style={{ textAlign: 'center' }}>
+          <div className="home-logo" style={{ fontSize: 18, marginBottom: 12 }}>
+            {isMissing ? 'Missing invite link' : 'Invalid invite link'}
+          </div>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.6, marginBottom: 24 }}>
+            {isMissing
+              ? 'This room requires a full invite link to join. The encryption key is embedded in the link — without it, messages cannot be decrypted.'
+              : 'The encryption key in this link appears to be malformed. Please ask the room creator for a fresh invite link.'
+            }
+          </div>
+          <button className="btn-primary" onClick={() => navigate('/')}>Back to home</button>
+        </div>
+      </div>
+    );
+  }
 
   // ── Join screen ──────────────────────────────────────────────────────────
   if (!joined) {
@@ -399,6 +439,11 @@ export default function Room() {
             }
           </button>
           {isHost && <button className="btn-end" onClick={() => setShowEndConfirm(true)}>End</button>}
+          <button
+            className="btn-report"
+            title="Report this room for abuse"
+            onClick={handleReport}
+          >Report</button>
         </div>
       </div>
 
@@ -406,7 +451,7 @@ export default function Room() {
       <div className="messages">
         {messages.map(msg => {
           const isMe = msg.sender_name === myName;
-          const isAI = msg.is_claude;
+          const isAI = msg.ai_model !== null;
           if (isAI) {
             const provider = guessProvider(msg.sender_name);
             return (
@@ -451,6 +496,12 @@ export default function Room() {
 
       {/* Input */}
       <div className="input-area">
+        {sendError && (
+          <div className="send-error">
+            {sendError}
+            <button className="send-error-dismiss" onClick={() => setSendError('')}>✕</button>
+          </div>
+        )}
         <div className="input-row">
           <textarea ref={inputRef} className="msg-input"
             placeholder={allProviders.length > 0 ? `Message… (${handleHint} to ask AI)` : 'Message…'}

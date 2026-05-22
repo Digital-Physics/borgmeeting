@@ -70,7 +70,7 @@ export default function ContextPicker({ messages, modelLabel = 'AI', onConfirm, 
                   </div>
                   <div className="context-msg-content">
                     <div className="context-msg-sender">
-                      {msg.is_claude ? (msg.ai_model ? msg.ai_model.charAt(0).toUpperCase() + msg.ai_model.slice(1) : modelLabel) : msg.sender_name}
+                      {msg.sender_name}
                     </div>
                     <div className="context-msg-text">
                       {truncate(msg.content)}

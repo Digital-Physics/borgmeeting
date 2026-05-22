@@ -82,7 +82,7 @@ export default function ExportPicker({ messages, roomName, skin, onExport, onCan
                   </div>
                   <div className="context-msg-content">
                     <div className="context-msg-sender" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      {msg.is_claude
+                      {msg.ai_model !== null
                         ? <><span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', background: 'var(--accent)', color: 'var(--accent-fg)', padding: '1px 5px', borderRadius: 3, letterSpacing: '0.05em' }}>AI</span> {msg.sender_name}</>
                         : msg.sender_name
                       }
