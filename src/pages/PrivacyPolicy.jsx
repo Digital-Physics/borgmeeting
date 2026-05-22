@@ -85,7 +85,7 @@ export default function PrivacyPolicy() {
             When you load the home page, we send a single anonymous ping to a
             counter (no third-party/Google analytics service) that increments a visit count for
             borgmeeting.com. No identifying information is recorded. This is our only telemetry as we launch. 
-            We will drop this counter if we ever blow up and aren't curious anymore.
+            We will drop this counter if we ever blow up and aren't curious to track it.
           </p>
         </Section>
 
