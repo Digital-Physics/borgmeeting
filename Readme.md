@@ -41,35 +41,6 @@ API keys are stored in your browser's `sessionStorage` only. They are never sent
 
 Set a spend limit on your API key before sharing a room link with others.
 
----
-
-## Self-hosting
-
-The frontend is a Vite/React app. The backend is a Cloudflare Worker with a D1 SQLite database.
-
-### Frontend
-
-```bash
-npm install
-cp env.example .env.local
-# set VITE_WORKER_URL to your worker URL
-npm run dev
-```
-
-### Backend (Cloudflare Worker)
-
-```bash
-cd worker
-npm install
-npx wrangler d1 create your-db-name
-# update wrangler.toml with your database_id
-npx wrangler d1 execute your-db-name --remote --file=src/schema.sql
-npx wrangler deploy
-```
-
-Set `ALLOWED_ORIGIN` in `wrangler.toml` to your frontend domain before deploying to production.
-
----
 
 ## Stack
 
