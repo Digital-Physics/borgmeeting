@@ -42,12 +42,12 @@ export default function PrivacyPolicy() {
         <Section title="What we store">
           <ul>
             <li>
-              <strong>Room metadata</strong> — room name, creator name, creation date,
+              <strong>Room metadata</strong> - room name, creator name, creation date,
               enabled AI providers, and auto-delete setting. This is unencrypted
-              because it has to be — it's needed to display the room to participants.
+              because it has to be - it's needed to display the room to participants.
             </li>
             <li>
-              <strong>Messages</strong> — stored as AES-GCM 256-bit encrypted ciphertext.
+              <strong>Messages</strong> - stored as AES-GCM 256-bit encrypted ciphertext.
               The decryption key lives only in your room link (the <code>#key=</code> fragment).
               It is never sent to our server. We store noise.
             </li>
@@ -61,12 +61,12 @@ export default function PrivacyPolicy() {
         <Section title="What we don't store">
           <ul>
             <li>
-              <strong>Your API keys</strong> — they live in your browser's sessionStorage
+              <strong>Your API keys</strong> - they live in your browser's sessionStorage
               and are sent directly from your browser to the AI provider (Anthropic, OpenAI,
               Google, xAI). They never touch our server.
             </li>
             <li>
-              <strong>Your message content</strong> — we store ciphertext. Without the
+              <strong>Your message content</strong> - we store ciphertext. Without the
               room link, it is mathematically unreadable.
             </li>
           </ul>
@@ -95,7 +95,7 @@ export default function PrivacyPolicy() {
             and your API key directly to that provider's API (Anthropic, OpenAI, Google, or
             xAI). Those requests are subject to each provider's own privacy policy and terms.
             We proxy the request through our worker to avoid exposing the provider API endpoint
-            directly, but the content of the request is your message context — we do not log it.
+            directly, but the content of the request is your message context - we do not log it.
           </p>
         </Section>
 
@@ -113,7 +113,7 @@ export default function PrivacyPolicy() {
         <Section title="Changes">
           <p>
             If we make material changes to this policy, we'll update the date above.
-            Since there are no accounts, we have no way to notify you directly — check
+            Since there are no accounts, we have no way to notify you directly - check
             back if it matters to you.
           </p>
         </Section>
