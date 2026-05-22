@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useSkin } from './SkinContext.jsx';
 import { AVATARS } from './skins.js';
 import SkinPicker from './SkinPicker.jsx';
@@ -264,6 +264,27 @@ export default function Home() {
           </button>
           {error && <div className="error-msg">{error}</div>}
         </form>
+      </div>
+
+      <div style={{
+        marginTop: 24,
+        display: 'flex',
+        gap: 20,
+        justifyContent: 'center',
+        fontSize: 12,
+        color: 'var(--text-tertiary)',
+      }}>
+        <Link to="/privacy" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>
+          Privacy policy
+        </Link>
+        <a
+          href="https://github.com/Digital-Physics/borgmeeting"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}
+        >
+          Open source
+        </a>
       </div>
     </div>
   );
