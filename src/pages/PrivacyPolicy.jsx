@@ -82,10 +82,10 @@ export default function PrivacyPolicy() {
 
         <Section title="Visit counter">
           <p>
-            When you load the home page, we send a single anonymous ping to a self-hosted
-            counter (no third-party analytics service) that increments a visit count for
-            borgmeeting.com. No IP address, browser fingerprint, or any other identifying
-            information is recorded. This is our only telemetry.
+            When you load the home page, we send a single anonymous ping to a
+            counter (no third-party/Google analytics service) that increments a visit count for
+            borgmeeting.com. No identifying information is recorded. This is our only telemetry as we launch. 
+            We will drop this counter if we ever blow up and aren't curious anymore.
           </p>
         </Section>
 
@@ -95,7 +95,7 @@ export default function PrivacyPolicy() {
             and your API key directly to that provider's API (Anthropic, OpenAI, Google, or
             xAI). Those requests are subject to each provider's own privacy policy and terms.
             We proxy the request through our worker to avoid exposing the provider API endpoint
-            directly, but the content of the request is your message context - we do not log it.
+            directly, but the content of the request is your message context. We do not log it.
           </p>
         </Section>
 
@@ -113,8 +113,8 @@ export default function PrivacyPolicy() {
         <Section title="Changes">
           <p>
             If we make material changes to this policy, we'll update the date above.
-            Since there are no accounts, we have no way to notify you directly - check
-            back if it matters to you.
+            Since there are no accounts or mailing list, we have no way to notify you directly. 
+            Check back for updates.
           </p>
         </Section>
 
